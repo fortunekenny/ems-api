@@ -7,40 +7,35 @@ import {
 
 const router = express.Router();
 
-const ADMIN = "admin";
-const STAFF = "staff";
-const STUDENT = "student";
-const PARENT = "parent";
-
 // Parent routes
 // router.post(
 //   "/",
 //   authenticateToken,
-//   authorizeRole(ADMIN),
+//   authorizeRole(),
 //   parentController.createParent,
 // ); // Create parent
 router.get(
   "/",
   authenticateToken,
-  authorizeRole(ADMIN, STAFF),
+  authorizeRole("admin"),
   parentController.getParents,
 ); // Get all parents
 router.get(
   "/:id",
   authenticateToken,
-  authorizeRole(ADMIN, STAFF),
+  authorizeRole("admin", "teacher"),
   parentController.getParentById,
 ); // Get parent by ID
 router.patch(
   "/:id",
   authenticateToken,
-  authorizeRole(ADMIN, STAFF),
+  authorizeRole("admin", "parent"),
   parentController.updateParent,
 ); // Update parent
 router.delete(
   "/:id",
   authenticateToken,
-  authorizeRole(ADMIN),
+  authorizeRole("admin"),
   parentController.deleteParent,
 ); // Delete parent
 

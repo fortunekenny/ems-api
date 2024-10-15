@@ -1,8 +1,15 @@
 import { StatusCodes } from "http-status-codes";
-import BadRequestError from "../errors/badRequest.js";
+
 import User from "../models/UserModel.js";
 import Parent from "../models/ParentModel.js";
-import { createTokenUser, attachCookiesToResponse } from "../utils/token.js";
+import BadRequestError from "../errors/bad-request.js";
+import createTokenUser from "../utils/createTokenUser.js";
+import { attachCookiesToResponse } from "../utils/jwt.js";
+import {
+  generateCurrentTerm,
+  startTermGenerationDate,
+  holidayDurationForEachTerm,
+} from "../utils/termGenerator.js";
 
 export const registerParent = async (req, res) => {
   const { name, email, password, children } = req.body;
@@ -13,10 +20,16 @@ export const registerParent = async (req, res) => {
   }
 
   // Check if email already exists
-  const emailAlreadyExists = await User.findOne({ email });
+  const emailAlreadyExists = await Parent.findOne({ email });
   if (emailAlreadyExists) {
     throw new BadRequestError("Email already exists");
   }
+
+  // Generate the current term based on the provided start date and holiday durations
+  const term = generateCurrentTerm(
+    startTermGenerationDate,
+    holidayDurationForEachTerm,
+  );
 
   try {
     // Create Parent user
@@ -25,6 +38,7 @@ export const registerParent = async (req, res) => {
       email,
       password,
       children, // Array of student ObjectId(s)
+      term,
     });
 
     // Create token for the new parent
@@ -35,7 +49,7 @@ export const registerParent = async (req, res) => {
 
     // Return parent details and token in response
     res.status(StatusCodes.CREATED).json({
-      parent: { name: parent.name, email: parent.email },
+      parent,
       token: tokenUser,
     });
   } catch (error) {

@@ -7,40 +7,35 @@ import * as classController from "../controllers/classController.js";
 
 const router = express.Router();
 
-// Role-based constants
-const ADMIN = "admin";
-const STAFF = "staff";
-const STUDENT = "student";
-
 // Class routes
 router.post(
   "/",
   authenticateToken,
-  authorizeRole(ADMIN, STAFF),
+  authorizeRole("admin"),
   classController.createClass,
 );
 router.get(
   "/",
   authenticateToken,
-  authorizeRole(ADMIN, STAFF),
+  authorizeRole("admin", "teacher"),
   classController.getClasses,
 );
 router.get(
   "/:id",
   authenticateToken,
-  authorizeRole(ADMIN, STAFF, STUDENT),
+  authorizeRole("admin", "teacher"),
   classController.getClassById,
 );
 router.patch(
   "/:id",
   authenticateToken,
-  authorizeRole(ADMIN, STAFF),
+  authorizeRole("admin"),
   classController.updateClass,
 );
 router.delete(
   "/:id",
   authenticateToken,
-  authorizeRole(ADMIN),
+  authorizeRole("admin"),
   classController.deleteClass,
 );
 

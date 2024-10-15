@@ -1,4 +1,3 @@
-import User from "../models/UserModel.js";
 import { StatusCodes } from "http-status-codes";
 import BadRequestError from "../errors/bad-request.js";
 import UnauthenticatedError from "../errors/unauthenticated.js";
@@ -86,38 +85,38 @@ export const login = async (req, res) => {
 
   try {
     // First, check in the Parent collection
-    let user = await Parent.findOne({ email }).populate("user");
-    if (user && (await bcrypt.compare(password, user.user.password))) {
+    let user = await Parent.findOne({ email });
+    if (user && (await bcrypt.compare(password, user.password))) {
       // If found, log in as Parent
-      const tokenUser = createTokenUser(user.user);
+      const tokenUser = createTokenUser(user); // Assuming Parent has name, email
       attachCookiesToResponse({ res, user: tokenUser });
       return res.status(StatusCodes.OK).json({
-        user: { name: user.user.name, email: user.user.email },
+        user,
         role: "parent",
       });
     }
 
     // If not found in Parent, check in Student collection
-    user = await Student.findOne({ email }).populate("user");
-    if (user && (await bcrypt.compare(password, user.user.password))) {
+    user = await Student.findOne({ email });
+    if (user && (await bcrypt.compare(password, user.password))) {
       // If found, log in as Student
-      const tokenUser = createTokenUser(user.user);
+      const tokenUser = createTokenUser(user); // Assuming Student has name, email
       attachCookiesToResponse({ res, user: tokenUser });
       return res.status(StatusCodes.OK).json({
-        user: { name: user.user.name, email: user.user.email },
+        user: { name: user.name, email: user.email },
         role: "student",
       });
     }
 
     // If not found in Parent or Student, check in Staff collection
-    user = await Staff.findOne({ email }).populate("user");
-    if (user && (await bcrypt.compare(password, user.user.password))) {
+    user = await Staff.findOne({ email });
+    if (user && (await bcrypt.compare(password, user.password))) {
       // If found, log in as Staff
-      const tokenUser = createTokenUser(user.user);
+      const tokenUser = createTokenUser(user); // Assuming Staff has name, email, role
       attachCookiesToResponse({ res, user: tokenUser });
       return res.status(StatusCodes.OK).json({
-        user: { name: user.user.name, email: user.user.email },
-        role: user.role, // This could be "admin", "teacher", etc.
+        user: { name: user.name, email: user.email },
+        role: user.role, // Could be "admin", "teacher", etc.
       });
     }
 

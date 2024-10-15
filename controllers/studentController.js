@@ -1,67 +1,51 @@
 import Student from "../models/StudentModel.js";
-
-// Create a new student
-/*export const createStudent = async (req, res) => {
-  try {
-    const {
-      user,
-      studentID,
-      class: classId,
-      guardian,
-      session,
-      term,
-      age,
-      gender,
-      address,
-      medicalHistory,
-    } = req.body;
-    const student = new Student({
-      user,
-      studentID,
-      class: classId,
-      guardian,
-      session,
-      term,
-      age,
-      gender,
-      address,
-      medicalHistory,
-    });
-    await student.save();
-    res.status(201).json(student);
-  } catch (error) {
-    res.status(400).json({ error: error.message });
-  }
-};*/
+import NotFoundError from "../errors/not-found.js";
+import { StatusCodes } from "http-status-codes";
+import checkPermissions from "../utils/checkPermissions.js";
 
 // Get all students
 export const getStudents = async (req, res) => {
   try {
-    const students = await Student.find().populate("user class guardian");
-    res.status(200).json(students);
+    const students = await Student.find().select("-password");
+    res.status(StatusCodes.OK).json({ students, count: students.length });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res
+      .status(StatusCodes.INTERNAL_SERVER_ERROR)
+      .json({ message: error.message });
   }
 };
 
-// Get student by ID
+// Get a student by ID
 export const getStudentById = async (req, res) => {
   try {
-    const student = await Student.findById(req.params.id).populate(
-      "user class guardian",
-    );
-    if (!student) return res.status(404).json({ error: "Student not found" });
-    res.status(200).json(student);
+    const { id: studentId } = req.params;
+    // const student = await Student.findOne({ _id: studentId }).populate('class, guardian')
+    const student = await Student.findOne({ _id: studentId })
+      .select("-password")
+      .populate([
+        { path: "class" },
+        { path: "guardian", select: "_id name email" },
+      ]);
+
+    if (!student) {
+      throw new NotFoundError(`No student found with id: ${studentId}`);
+    }
+
+    res.status(StatusCodes.OK).json(student);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res
+      .status(StatusCodes.INTERNAL_SERVER_ERROR)
+      .json({ message: error.message });
   }
 };
 
 // Update student details
 export const updateStudent = async (req, res) => {
   try {
+    const { id: studentId } = req.params;
     const {
-      class: classId,
+      name,
+      class: classId, // Destructure class and rename it to classId
       guardian,
       session,
       term,
@@ -70,35 +54,61 @@ export const updateStudent = async (req, res) => {
       address,
       medicalHistory,
     } = req.body;
-    const updatedStudent = await Student.findByIdAndUpdate(
-      req.params.id,
-      {
-        class: classId,
-        guardian,
-        session,
-        term,
-        age,
-        gender,
-        address,
-        medicalHistory,
-      },
-      { new: true },
-    );
-    if (!updatedStudent)
-      return res.status(404).json({ error: "Student not found" });
-    res.status(200).json(updatedStudent);
+
+    // Find the student by ID
+    const student = await Student.findOne({ _id: studentId });
+
+    if (!student) {
+      throw new NotFoundError(`No student found with id: ${studentId}`);
+    }
+
+    // Check permissions for the user
+    checkPermissions(req.user, student.user);
+
+    // Update student fields with existing values if not provided
+    student.name = name || student.name;
+    student.class = classId || student.class;
+    student.guardian = guardian || student.guardian;
+    student.session = session || student.session;
+    student.term = term || student.term;
+    student.age = age || student.age;
+    student.gender = gender || student.gender;
+    student.address = address || student.address;
+    student.medicalHistory = medicalHistory || student.medicalHistory;
+
+    // Save the updated student
+    await student.save();
+
+    res.status(StatusCodes.OK).json(student);
   } catch (error) {
-    res.status(400).json({ error: error.message });
+    res
+      .status(StatusCodes.INTERNAL_SERVER_ERROR)
+      .json({ message: error.message });
   }
 };
 
-// Delete student
+// Delete student (Admin Only)
 export const deleteStudent = async (req, res) => {
   try {
-    const student = await Student.findByIdAndDelete(req.params.id);
-    if (!student) return res.status(404).json({ error: "Student not found" });
-    res.status(200).json({ message: "Student deleted successfully" });
+    const { id: studentId } = req.params;
+    const student = await Student.findOne({ _id: studentId });
+
+    if (!student) {
+      throw new NotFoundError(`No student found with id: ${studentId}`);
+    }
+
+    // Ensure only admins can delete a student
+    if (req.user.role !== "admin") {
+      throw new UnauthorizedError("Only admins can delete student records.");
+    }
+
+    await student.deleteOne();
+    res
+      .status(StatusCodes.OK)
+      .json({ message: "Student deleted successfully" });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res
+      .status(StatusCodes.INTERNAL_SERVER_ERROR)
+      .json({ message: error.message });
   }
 };

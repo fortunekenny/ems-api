@@ -1,4 +1,6 @@
 import mongoose from "mongoose";
+import bcrypt from "bcryptjs"; // Import bcrypt for password hashing
+import { generateCurrentTerm } from "../utils/termGenerator.js";
 
 // Utility functions
 const generateID = async (prefix, Model) => {
@@ -16,49 +18,59 @@ const getCurrentSession = () => {
   return `${currentYear}/${currentYear + 1}`;
 };
 
-/*const staffSchema = new mongoose.Schema({
-  user: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
-  employeeID: { type: String, required: true, unique: true }, // Auto-generated
-  role: { type: String, enum: ["teacher", "non-teacher"], required: true },
-  department: { type: String }, // Optional for non-teachers
-  subjects: [{ type: mongoose.Schema.Types.ObjectId, ref: "Subject" }], // For teachers
-  classes: [{ type: mongoose.Schema.Types.ObjectId, ref: "Class" }], // For teachers
-  session: { type: String, required: true }, // e.g., 2023/2024
-  term: { type: String, required: true }, // e.g., First, Second, Third
-  createdAt: { type: Date, default: Date.now },
-  updatedAt: { type: Date, default: Date.now },
-});
-*/
-
+// Define the schema
 const staffSchema = new mongoose.Schema({
-  user: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
-  employeeID: { type: String, required: true, unique: true },
+  name: { type: String, required: true }, // Staff member's name
+  email: { type: String, required: true, unique: true }, // Unique email
+  password: { type: String, required: true }, // Password (hashed later)
+  employeeID: { type: String, required: true, unique: true }, // Employee ID generated automatically
   role: {
     type: String,
     enum: ["admin", "teacher", "non-teacher"],
     required: true,
-  }, // Admin added
-  department: { type: String }, // Optional: For non-teaching staff
-  subjects: [{ type: mongoose.Schema.Types.ObjectId, ref: "Subject" }], // Only for teachers
-  classes: [{ type: mongoose.Schema.Types.ObjectId, ref: "Class" }], // Only for teachers
-  session: { type: String, required: true }, // e.g., 2023/2024
-  term: { type: String, required: true }, // e.g., First, Second, Third
+  }, // Admin, teacher, or non-teacher roles
+  department: { type: String }, // Optional: For non-teaching staff or department-specific teachers
+  subjects: [{ type: mongoose.Schema.Types.ObjectId, ref: "Subject" }], // Subjects assigned to teachers
+  classes: [{ type: mongoose.Schema.Types.ObjectId, ref: "Class" }], // Classes assigned to teachers
+  isClassTeacher: { type: mongoose.Schema.Types.ObjectId, ref: "Class" }, // Reference to the class they are class teacher of
+  session: { type: String, required: true }, // Academic session
+  term: { type: String, required: false }, // e.g., First, Second, Third term
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now },
 });
 
-// Pre-save middleware to generate employeeID and set session
-staffSchema.pre("save", async function (next) {
+// Pre-save middleware for handling password hashing, employeeID generation, and setting session
+staffSchema.pre("validate", async function (next) {
   if (this.isNew) {
-    // Generate employeeID
-    this.employeeID = await generateID("EMP", mongoose.model("Staff"));
+    // Hash the password before saving if it's a new staff member
+    if (this.isModified("password")) {
+      const salt = await bcrypt.genSalt(10); // Generate salt for hashing
+      this.password = await bcrypt.hash(this.password, salt); // Hash the password
+    }
 
-    // Set current session
-    this.session = getCurrentSession();
+    // Generate employeeID for new staff members if not already set
+    if (!this.employeeID) {
+      this.employeeID = await generateID("EMP", mongoose.model("Staff"));
+    }
+
+    // Set the current academic session if not already set
+    if (!this.session) {
+      this.session = getCurrentSession();
+    }
   }
   next();
 });
 
-const Staff = mongoose.model("Staff", staffSchema);
+// Method to dynamically update term based on start date and holiday durations
+staffSchema.methods.updateTerm = function (startDate, holidayDurations) {
+  this.term = generateCurrentTerm(startDate, holidayDurations); // Call the term generator function
+};
 
+// Method to compare password for login authentication
+staffSchema.methods.comparePassword = async function (candidatePassword) {
+  return await bcrypt.compare(candidatePassword, this.password); // Compare the provided password with the stored hashed password
+};
+
+// Export the Staff model
+const Staff = mongoose.model("Staff", staffSchema);
 export default Staff;

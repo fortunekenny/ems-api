@@ -7,39 +7,35 @@ import * as staffController from "../controllers/staffController.js";
 
 const router = express.Router();
 
-// Role-based constants
-const ADMIN = "admin";
-const STAFF = "staff";
-
 // Staff routes
 // router.post(
 //   "/",
 //   authenticateToken,
-//   authorizeRole(ADMIN),
+//   authorizeRole('admin'),
 //   staffController.createStaff,
 // );
 router.get(
   "/",
   authenticateToken,
-  authorizeRole(ADMIN),
+  authorizeRole("admin"),
   staffController.getStaff,
 );
 router.get(
   "/:id",
   authenticateToken,
-  authorizeRole(ADMIN, STAFF),
+  authorizeRole("admin", "staff"),
   staffController.getStaffById,
 );
 router.patch(
   "/:id",
   authenticateToken,
-  authorizeRole(ADMIN),
+  authorizeRole("admin"),
   staffController.updateStaff,
 );
 router.delete(
   "/:id",
   authenticateToken,
-  authorizeRole(ADMIN),
+  authorizeRole("admin"),
   staffController.deleteStaff,
 );
 

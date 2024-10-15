@@ -17,6 +17,59 @@ export const authenticateToken = async (req, res, next) => {
   }
 };
 
+/*
+export const authenticateToken = async (req, res, next) => {
+  const token = req.signedCookies.token;
+
+  if (!token) {
+    throw new UnauthenticatedError("Authentication invalid");
+  }
+  try {
+    // Validate token and extract payload
+    const decoded = isTokenValid({ token });
+
+    // Ensure decoded has the expected properties
+    if (!decoded || !decoded.name || !decoded.userId || !decoded.role) {
+      throw new UnauthenticatedError("Authentication invalid");
+    }
+
+    // Populate req.user with necessary information
+    req.user = {
+      name: decoded.name,
+      userId: decoded.userId,
+      role: decoded.role,
+    };
+    next();
+  } catch (error) {
+    throw new UnauthenticatedError("Authentication invalid");
+  }
+};*/
+
+/*
+export const authenticateToken = async (req, res, next) => {
+  const token = req.signedCookies.token;
+
+  if (!token) {
+    throw new UnauthenticatedError("Authentication invalid");
+  }
+
+  try {
+    // Verify the token and extract payload
+    const decoded = isTokenValid({ token }); // Should return an object with name, userId, and role
+
+    // Populate req.user with token details
+    req.user = {
+      name: decoded.name,
+      userId: decoded.userId,
+      role: decoded.role,
+    };
+
+    next(); // Continue to the next middleware or route handler
+  } catch (error) {
+    throw new UnauthenticatedError("Authentication invalid");
+  }
+};*/
+
 // export const authorizeRole = (...roles) => {
 //   return (req, res, next) => {
 //     if (!roles.includes(req.user.role)) {

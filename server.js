@@ -118,8 +118,11 @@ app.use(cors());
 app.use(xss());
 app.use(mongoSanitize());
 
-// Serve static files
-app.use(express.json());
+// Body parsers (to handle request bodies)
+app.use(express.json()); // Parse application/json
+app.use(express.urlencoded({ extended: true })); // Parse application/x-www-form-urlencoded
+
+// Cookie parser
 app.use(cookieParser(process.env.JWT_SECRET));
 
 // Development logging
