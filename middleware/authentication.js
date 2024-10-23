@@ -9,8 +9,8 @@ export const authenticateToken = async (req, res, next) => {
     throw new UnauthenticatedError("Authentication invalid");
   }
   try {
-    const { name, userId, role } = isTokenValid({ token });
-    req.user = { name, userId, role };
+    const { name, userId, role, status } = isTokenValid({ token });
+    req.user = { name, userId, role, status };
     next();
   } catch (error) {
     throw new UnauthenticatedError("Authentication invalid");

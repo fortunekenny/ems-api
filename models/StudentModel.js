@@ -24,10 +24,10 @@ const studentSchema = new mongoose.Schema({
   email: { type: String, required: true, unique: true }, // Unique email
   password: { type: String, required: true }, // Password (hashed later)
   studentID: { type: String, required: true, unique: true }, // Auto-generated student ID
-  class: {
+  classId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "Class",
-    required: false,
+    required: true,
   }, // Class reference
   guardian: {
     type: mongoose.Schema.Types.ObjectId,
@@ -35,6 +35,7 @@ const studentSchema = new mongoose.Schema({
     required: true, // Guardian reference
   },
   role: { type: String, default: "student" }, // Default role for students
+  status: { type: String, enum: ["active", "inactive"], default: "active" },
   session: { type: String, required: true }, // e.g., 2023/2024
   term: { type: String, required: false }, // Term (e.g., First, Second, Third)
   age: { type: Number, required: true }, // Age of the student

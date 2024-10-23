@@ -33,7 +33,6 @@ export const createClass = async (req, res) => {
       startTermGenerationDate,
       holidayDurationForEachTerm,
     );
-    console.log(term);
 
     const newClass = new Class({
       className,
@@ -78,7 +77,10 @@ export const getClassById = async (req, res) => {
       { path: "classTeacher", select: "_id name email employeeID" },
       { path: "subjectTeachers", select: "_id name email employeeID" },
       { path: "students", select: "_id name email studentID" },
-      { path: "subjects" },
+      {
+        path: "subjects",
+        select: "_id subjectName subjectCode subjectTeachers",
+      },
     ]);
 
     if (!classData) {

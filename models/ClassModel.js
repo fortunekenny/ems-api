@@ -24,7 +24,7 @@ const classSchema = new mongoose.Schema({
     },
   ],
   students: [{ type: mongoose.Schema.Types.ObjectId, ref: "Student" }], // List of students in the class
-  subjects: [{ type: mongoose.Schema.Types.ObjectId, ref: "Subject" }], // Subjects taught in the class
+  subjects: [{ type: mongoose.Schema.Types.ObjectId, ref: "Subject" }], // Subjects taught in the class. Input if not class teacher or class teacher but teaches other class
   session: { type: String, required: true }, // e.g., 2023/2024
   term: { type: String, required: true }, // e.g., First, Second, Third
   timetable: {

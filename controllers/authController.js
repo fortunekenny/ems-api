@@ -115,8 +115,12 @@ export const login = async (req, res) => {
       const tokenUser = createTokenUser(user); // Assuming Staff has name, email, role
       attachCookiesToResponse({ res, user: tokenUser });
       return res.status(StatusCodes.OK).json({
-        user: { name: user.name, email: user.email },
-        role: user.role, // Could be "admin", "teacher", etc.
+        user: {
+          name: user.name,
+          email: user.email,
+          role: user.role,
+          status: user.status,
+        },
       });
     }
 

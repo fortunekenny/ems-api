@@ -4,42 +4,45 @@ import {
   authorizeRole,
 } from "../middleware/authentication.js";
 import * as subjectController from "../controllers/subjectController.js";
+import { checkStatus } from "../utils/checkStatus.js";
 
 const router = express.Router();
-
-// Role-based constants
-const ADMIN = "admin";
-const STAFF = "staff";
 
 // Subject routes
 router.post(
   "/",
   authenticateToken,
-  authorizeRole(ADMIN, STAFF),
+  authorizeRole("admin"),
+  checkStatus,
   subjectController.createSubject,
 );
 router.get(
   "/",
   authenticateToken,
-  authorizeRole(ADMIN, STAFF),
+  authorizeRole("admin"),
+  checkStatus,
   subjectController.getSubjects,
 );
 router.get(
   "/:id",
   authenticateToken,
-  authorizeRole(ADMIN, STAFF),
+  authorizeRole("admin", "teacher"),
+  checkStatus,
   subjectController.getSubjectById,
 );
+
 router.patch(
   "/:id",
   authenticateToken,
-  authorizeRole(ADMIN, STAFF),
+  authorizeRole("admin"),
+  checkStatus,
   subjectController.updateSubject,
 );
 router.delete(
   "/:id",
   authenticateToken,
-  authorizeRole(ADMIN),
+  authorizeRole("admin"),
+  checkStatus,
   subjectController.deleteSubject,
 );
 

@@ -28,13 +28,14 @@ const staffSchema = new mongoose.Schema({
     type: String,
     enum: ["admin", "teacher", "non-teacher"],
     required: true,
-  }, // Admin, teacher, or non-teacher roles
-  department: { type: String }, // Optional: For non-teaching staff or department-specific teachers
-  subjects: [{ type: mongoose.Schema.Types.ObjectId, ref: "Subject" }], // Subjects assigned to teachers
-  classes: [{ type: mongoose.Schema.Types.ObjectId, ref: "Class" }], // Classes assigned to teachers
-  isClassTeacher: { type: mongoose.Schema.Types.ObjectId, ref: "Class" }, // Reference to the class they are class teacher of
-  session: { type: String, required: true }, // Academic session
-  term: { type: String, required: false }, // e.g., First, Second, Third term
+  }, // Admin, teacher, or non-teacher roles. Input
+  department: { type: String }, // Optional: For non-teaching staff or department-specific teachers. Input
+  subjects: [{ type: mongoose.Schema.Types.ObjectId, ref: "Subject" }], // Subjects assigned to teachers. Automated if isClassTeacher is inputed and input if teacher is subjects teacher
+  classes: [{ type: mongoose.Schema.Types.ObjectId, ref: "Class" }], // Classes assigned to teachers. Input if teacher is a subject teacher for more than 1 class
+  isClassTeacher: { type: mongoose.Schema.Types.ObjectId, ref: "Class" }, // Reference to the class they are class teacher of. Input if a class teacher
+  status: { type: String, enum: ["active", "inactive"], default: "active" }, // Automated
+  session: { type: String, required: true }, // Academic session. Automated
+  term: { type: String, required: false }, // e.g., First, Second, Third term. Automated
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now },
 });
