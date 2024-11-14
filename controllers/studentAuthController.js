@@ -1,20 +1,39 @@
+// Import necessary models and utilities at the top
 import Parent from "../models/ParentModel.js";
 import Student from "../models/StudentModel.js";
 import Class from "../models/ClassModel.js";
 import Subject from "../models/SubjectModel.js";
+import Attendance from "../models/AttendanceModel.js";
 import { StatusCodes } from "http-status-codes";
 import BadRequestError from "../errors/bad-request.js";
 import createTokenUser from "../utils/createTokenUser.js";
 import { attachCookiesToResponse } from "../utils/jwt.js";
 import {
-  generateCurrentTerm,
+  getCurrentTermDetails,
   startTermGenerationDate,
   holidayDurationForEachTerm,
 } from "../utils/termGenerator.js";
 
+// Utility to generate a list of school days in a term (excluding weekends)
+const getSchoolDays = (startDate, endDate) => {
+  const schoolDays = [];
+  let currentDate = new Date(startDate);
+
+  while (currentDate <= endDate) {
+    const dayOfWeek = currentDate.getDay();
+    if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+      schoolDays.push(new Date(currentDate));
+    }
+    currentDate.setDate(currentDate.getDate() + 1);
+  }
+
+  return schoolDays;
+};
+
+// Register Student and create attendance
 export const registerStudent = async (req, res) => {
-  const { role, userId } = req.user; // Extracting role and userId from req.user
-  const { name, email, password, classId, age, gender, address, guardianId } =
+  const { role, userId } = req.user;
+  const { name, email, password, classId, age, gender, address, guardian } =
     req.body;
 
   // Validate required fields
@@ -25,7 +44,7 @@ export const registerStudent = async (req, res) => {
   }
 
   try {
-    // Check if the user is a parent or an admin
+    // Role validation: Only parent or admin can register a student
     if (role !== "parent" && role !== "admin") {
       return res.status(StatusCodes.FORBIDDEN).json({
         error: "Access denied. Only parents or admins can register students.",
@@ -33,9 +52,8 @@ export const registerStudent = async (req, res) => {
     }
 
     let parent = null;
-    let guardian = null;
+    let guardianId = null;
 
-    // Logic for parents: The parent is automatically the guardian
     if (role === "parent") {
       parent = await Parent.findById(userId);
       if (!parent) {
@@ -43,24 +61,23 @@ export const registerStudent = async (req, res) => {
           .status(StatusCodes.NOT_FOUND)
           .json({ error: "Parent not found" });
       }
-      guardian = parent._id; // Set the current parent as the guardian
+      guardianId = parent._id;
     }
 
-    // Logic for admins: Admin must assign a guardian (parent)
     if (role === "admin") {
-      if (!guardianId) {
+      if (!guardian) {
         throw new BadRequestError(
           "Admin must assign a guardian (parent) for the student.",
         );
       }
 
-      guardian = await Parent.findById(guardianId);
-      if (!guardian) {
+      const assignedGuardian = await Parent.findById(guardian);
+      if (!assignedGuardian) {
         return res
           .status(StatusCodes.NOT_FOUND)
           .json({ error: "Assigned guardian (parent) not found." });
       }
-      guardian = guardian._id; // Set the assigned parent as the guardian
+      guardianId = assignedGuardian._id;
     }
 
     const emailAlreadyExists = await Student.findOne({ email });
@@ -68,79 +85,94 @@ export const registerStudent = async (req, res) => {
       throw new BadRequestError("Student email already exists");
     }
 
-    // Generate the current term based on the provided start date and holiday durations
-    const term = generateCurrentTerm(
+    // Generate current term details using start date and holiday durations
+    const termDetails = getCurrentTermDetails(
       startTermGenerationDate,
       holidayDurationForEachTerm,
     );
+    const { term, startDate, endDate } = termDetails;
 
-    // Create the new student with the assigned guardian (either parent or assigned by admin)
+    // Create and save the new student
     const student = new Student({
       name,
       email,
       password,
       classId,
-      guardian, // Set the guardian (either the parent or assigned parent by admin)
+      guardian: guardianId,
       age,
       gender,
       address,
-      term, // Set the generated term
+      term,
+      session: "2024/2025",
     });
 
-    // Save the student to the database
     await student.save();
 
-    // Find the class by classId
+    // Verify class exists and add student
     const assignedClass = await Class.findById(classId);
-
-    // Check if the class exists and if it matches the current term and session
     if (!assignedClass) {
       throw new BadRequestError(`Class with id ${classId} not found`);
     }
-
     if (
       assignedClass.term === term &&
       assignedClass.session === student.session
     ) {
-      // Append the student to the class's students array
       assignedClass.students.push(student._id);
-      await assignedClass.save(); // Save the class with the updated students list
+      await assignedClass.save();
     }
 
-    // Find all subjects associated with the class
-    const subjects = await Subject.find({
-      _id: { $in: assignedClass.subjects }, // Ensure assignedClass.subjects exists before querying
-    });
+    // Retrieve the class teacher from the class document
+    const classTeacher = assignedClass.classTeacher;
 
-    // Append the student to the subjects' students array (for matching term and session)
+    // Update subjects for the assigned class
+    const subjects = await Subject.find({
+      _id: { $in: assignedClass.subjects },
+    });
     for (const subject of subjects) {
       if (subject.term === term && subject.session === student.session) {
-        subject.students.push(student._id); // Add the student to the subject's students array
-        await subject.save(); // Save the subject with the updated students list
+        subject.students.push(student._id);
+        await subject.save();
       }
     }
 
-    // If a parent registered the student, add the student ID to the parent's children array
+    // Update parent's children
     if (role === "parent") {
       parent.children.push(student._id);
-      await parent.save(); // Save the parent with the updated children list
+      await parent.save();
     }
 
-    // If the student was registered by an admin, add the student ID to the assigned guardian's children
     if (role === "admin") {
-      const assignedParent = await Parent.findById(guardianId);
+      const assignedParent = await Parent.findById(guardian);
       assignedParent.children.push(student._id);
-      await assignedParent.save(); // Save the assigned parent with the updated children list
+      await assignedParent.save();
     }
 
-    // Optionally generate a token for the student (if needed)
-    const tokenUser = createTokenUser(student); // Create token user for the student
-    attachCookiesToResponse({ res, user: tokenUser }); // Attach token to response cookies
+    // Generate school days and attendance records
+    const schoolDays = getSchoolDays(new Date(startDate), new Date(endDate));
+    const attendanceIds = [];
+    for (const date of schoolDays) {
+      const attendance = new Attendance({
+        student: student._id,
+        classId: classId,
+        date: date,
+        status: "Pending",
+        session: student.session,
+        term: student.term,
+        classTeacher: classTeacher, // Add classTeacher to attendance
+      });
+      const savedAttendance = await attendance.save();
+      attendanceIds.push(savedAttendance._id);
+    }
 
-    // Respond with success
+    student.attendance = attendanceIds; // Add attendance IDs to the student document
+    await student.save(); // Save updated student with attendance references
+
+    const tokenUser = createTokenUser(student);
+    attachCookiesToResponse({ res, user: tokenUser });
+
     res.status(StatusCodes.CREATED).json({
       student,
-      token: tokenUser, // Sending the token for the student
+      token: tokenUser,
     });
   } catch (error) {
     res.status(StatusCodes.BAD_REQUEST).json({ error: error.message });

@@ -11,36 +11,44 @@ const router = express.Router();
 router
   .route("/")
   .get(
-    [authenticateToken, checkStatus, authorizeRole("admin")],
+    [authenticateToken, checkStatus, authorizeRole("admin", "proprietor")],
     staffController.getStaff,
   );
 
-router
-  .route("/staff/all")
-  .delete(
-    [authenticateToken, checkStatus, authorizeRole("admin")],
-    staffController.deleteAllStaff,
-  );
+// router
+//   .route("/staff/all")
+//   .delete(
+//     [authenticateToken, checkStatus, authorizeRole("admin")],
+//     staffController.deleteAllStaff,
+//   );
 
 router
   .route("/:id")
   .get(
-    [authenticateToken, checkStatus, authorizeRole("admin", "staff")],
+    [
+      authenticateToken,
+      checkStatus,
+      authorizeRole("admin", "proprietor", "teacher", "non-teacher"),
+    ],
     staffController.getStaffById,
   )
   .patch(
-    [authenticateToken, checkStatus, authorizeRole("admin")],
+    [
+      authenticateToken,
+      checkStatus,
+      authorizeRole("admin", "proprietor", "teacher", "non-teacher"),
+    ],
     staffController.updateStaff,
   )
   .delete(
-    [authenticateToken, checkStatus, authorizeRole("admin")],
+    [authenticateToken, checkStatus, authorizeRole("admin", "proprietor")],
     staffController.deleteStaff,
   );
 
 router
   .route("/staff/:id/status")
   .patch(
-    [authenticateToken, checkStatus, authorizeRole("admin")],
+    [authenticateToken, checkStatus, authorizeRole("admin", "proprietor")],
     staffController.updateStaffStatus,
   );
 

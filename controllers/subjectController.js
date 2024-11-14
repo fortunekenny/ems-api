@@ -2,12 +2,12 @@ import Subject from "../models/SubjectModel.js";
 import Class from "../models/ClassModel.js"; // Import the Class model
 import { StatusCodes } from "http-status-codes";
 import BadRequestError from "../errors/bad-request.js";
+import NotFoundError from "../errors/not-found.js";
 import {
   generateCurrentTerm,
   startTermGenerationDate,
   holidayDurationForEachTerm,
 } from "../utils/termGenerator.js"; // Import the term generation function
-import NotFoundError from "../errors/not-found.js";
 import UnauthorizedError from "../errors/unauthorize.js"; // Direct import of UnauthorizedError
 import checkPermissions from "../utils/checkPermissions.js";
 

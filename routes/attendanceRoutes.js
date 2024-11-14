@@ -1,47 +1,60 @@
 import express from "express";
 import {
+  getAttendanceForStudent,
+  markAttendanceForToday,
+  getAttendanceForClass,
+  getClassAttendanceForToday,
+  deleteStudentAttendanceForTerm,
+} from "../controllers/attendanceController.js";
+import {
   authenticateToken,
   authorizeRole,
+  authorizeClassTeacherOrAdminOrParent,
+  authorizeClassTeacherOrAdmin,
 } from "../middleware/authentication.js";
-import * as attendanceController from "../controllers/attendanceController.js";
+import { checkStatus } from "../utils/checkStatus.js";
 
 const router = express.Router();
 
-// Role-based constants
-const ADMIN = "admin";
-const STAFF = "staff";
-const STUDENT = "student";
-
-// Route to create or mark attendance
-router.post(
-  "/attendance",
-  authenticateToken,
-  authorizeRole(ADMIN, STAFF),
-  attendanceController.markAttendance,
-);
-
-// Route to get attendance records for a specific student
-router.get(
-  "/attendance/:studentId",
-  authenticateToken,
-  authorizeRole(ADMIN, STAFF, STUDENT),
-  attendanceController.getAttendanceByStudent,
-);
-
-// Route to update attendance
 router.patch(
-  "/attendance/:id",
+  "/student/:studentId/mark",
   authenticateToken,
-  authorizeRole(ADMIN, STAFF),
-  attendanceController.updateAttendance,
+  checkStatus,
+  // authorizeClassTeacherOrAdmin,
+  authorizeRole("admin proprietor teacher"),
+  markAttendanceForToday,
+);
+router.get(
+  "/student/:studentId/attendance",
+  authenticateToken,
+  checkStatus,
+  // authorizeClassTeacherOrAdminOrParent,
+  authorizeRole("admin", "proprietor", "teacher", "parent", "student"),
+  getAttendanceForStudent,
+);
+router.get(
+  "/class/:classId/attendance",
+  authenticateToken,
+  checkStatus,
+  // authorizeClassTeacherOrAdmin,
+  authorizeRole("admin", "proprietor", "teacher"),
+  getAttendanceForClass,
+);
+router.get(
+  "/class/:classId/today",
+  authenticateToken,
+  checkStatus,
+  // authorizeClassTeacherOrAdmin,
+  authorizeRole("admin", "proprietor", "teacher"),
+  getClassAttendanceForToday,
 );
 
-// Route to delete attendance
 router.delete(
-  "/attendance/:id",
+  "/student/:studentId/attendance/term",
   authenticateToken,
-  authorizeRole(ADMIN),
-  attendanceController.deleteAttendance,
+  checkStatus,
+  authorizeRole("admin", "proprietor"), // Ensure only authorized users can delete attendance records
+  deleteStudentAttendanceForTerm,
 );
 
 export default router;

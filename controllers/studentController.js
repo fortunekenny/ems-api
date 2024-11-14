@@ -5,6 +5,7 @@ import Parent from "../models/ParentModel.js";
 import NotFoundError from "../errors/not-found.js";
 import { StatusCodes } from "http-status-codes";
 import checkPermissions from "../utils/checkPermissions.js";
+import Attendance from "../models/AttendanceModel.js";
 
 // Get all students
 export const getStudents = async (req, res) => {
@@ -204,8 +205,6 @@ export const deleteStudent = async (req, res) => {
       throw new UnauthorizedError("Only admins can delete student records.");
     }
 
-    checkPermissions;
-
     // Step 1: Remove the student from all related classes
     await Class.updateMany(
       { students: studentId }, // Find classes where the student is referenced
@@ -226,12 +225,15 @@ export const deleteStudent = async (req, res) => {
       );
     }
 
-    // Step 4: Delete the student record
+    // Step 4: Delete all attendance records associated with the student
+    await Attendance.deleteMany({ student: studentId });
+
+    // Step 5: Delete the student record
     await student.deleteOne();
 
     res
       .status(StatusCodes.OK)
-      .json({ message: "Student deleted successfully" });
+      .json({ message: "Student and associated records deleted successfully" });
   } catch (error) {
     res
       .status(StatusCodes.INTERNAL_SERVER_ERROR)

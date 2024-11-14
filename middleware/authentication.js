@@ -1,3 +1,5 @@
+import Class from "../models/ClassModel.js";
+import Student from "../models/StudentModel.js";
 import UnauthenticatedError from "../errors/unauthenticated.js";
 import UnauthorizedError from "../errors/unauthorize.js";
 import { isTokenValid } from "../utils/jwt.js";
@@ -96,4 +98,68 @@ export const authorizeRole = (...roles) => {
     // Call next middleware if role is valid
     next();
   };
+};
+
+// authorize.js
+
+// Middleware to check if the user is an admin or the class teacher for the given class
+export const authorizeClassTeacherOrAdmin = async (req, res, next) => {
+  const { classId } = req.params;
+  const { user } = req;
+
+  if (user.role === "admin") {
+    return next(); // Grant access if the user is an admin
+  }
+
+  // Check if the user is the class teacher for the specified class
+  const classData = await Class.findById(classId);
+
+  if (!classData || String(classData.classTeacher) !== String(user._id)) {
+    throw new UnauthorizedError(
+      "You are not authorized to access this resource.",
+    );
+  }
+
+  next(); // Grant access if the user is the class teacher
+};
+
+export const authorizeClassTeacherOrAdminOrParent = async (req, res, next) => {
+  const { user } = req;
+  const { studentId, classId } = req.params;
+
+  try {
+    // Check if the user is an admin or a parent
+    if (user.role === "admin" || user.role === "parent") {
+      return next();
+    }
+
+    // Identify the class ID based on studentId or classId in the request
+    let classToCheck;
+    if (studentId) {
+      const student = await Student.findById(studentId).populate("classId"); // Populate the student's class
+      if (!student) {
+        return res.status(404).json({ msg: "Student not found" });
+      }
+      classToCheck = student.classId;
+    } else if (classId) {
+      classToCheck = await Class.findById(classId);
+    }
+
+    if (!classToCheck) {
+      return res.status(404).json({ msg: "Class not found" });
+    }
+
+    // Check if the current user is the class teacher of this class
+    if (String(classToCheck.classTeacher) === String(user._id)) {
+      return next();
+    }
+
+    // If none of the conditions are met, deny access
+    return res
+      .status(403)
+      .json({ msg: "You are not authorized to access this route" });
+  } catch (error) {
+    console.error("Authorization error:", error);
+    res.status(500).json({ msg: "Internal server error" });
+  }
 };

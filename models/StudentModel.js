@@ -34,6 +34,7 @@ const studentSchema = new mongoose.Schema({
     ref: "Parent",
     required: true, // Guardian reference
   },
+  attendance: [{ type: mongoose.Schema.Types.ObjectId, ref: "Attendance" }], // Define as array of ObjectIds
   role: { type: String, default: "student" }, // Default role for students
   status: { type: String, enum: ["active", "inactive"], default: "active" },
   session: { type: String, required: true }, // e.g., 2023/2024

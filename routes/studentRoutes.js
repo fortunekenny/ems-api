@@ -12,21 +12,21 @@ const router = express.Router();
 router.get(
   "/",
   authenticateToken,
-  authorizeRole("admin"),
+  authorizeRole("admin", "proprietor"),
   checkStatus,
   studentController.getStudents,
 );
 router.get(
   "/:id",
   authenticateToken,
-  authorizeRole("admin", "teacher", "parent"),
+  authorizeRole("admin", "proprietor", "teacher", "parent", "student"),
   checkStatus,
   studentController.getStudentById,
 );
 router.patch(
   "/:id",
   authenticateToken,
-  authorizeRole("admin", "teacher", "parent"),
+  authorizeRole("admin", "proprietor", "parent", "student"),
   checkStatus,
   studentController.updateStudent,
 );
@@ -35,7 +35,7 @@ router.patch(
 router.patch(
   "/student/:id/status",
   authenticateToken,
-  authorizeRole("admin"),
+  authorizeRole("admin", "proprietor"),
   checkStatus,
   studentController.updateStudentStatus,
 );
@@ -43,7 +43,7 @@ router.patch(
 router.delete(
   "/:id",
   authenticateToken,
-  authorizeRole("admin"),
+  authorizeRole("admin", "proprietor"),
   checkStatus,
   studentController.deleteStudent,
 );

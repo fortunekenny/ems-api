@@ -26,7 +26,7 @@ const staffSchema = new mongoose.Schema({
   employeeID: { type: String, required: true, unique: true }, // Employee ID generated automatically
   role: {
     type: String,
-    enum: ["admin", "teacher", "non-teacher"],
+    enum: ["admin", "teacher", "non-teacher", "proprietor"],
     required: true,
   }, // Admin, teacher, or non-teacher roles. Input
   department: { type: String }, // Optional: For non-teaching staff or department-specific teachers. Input

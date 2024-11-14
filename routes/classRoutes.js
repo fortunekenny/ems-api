@@ -12,28 +12,28 @@ const router = express.Router();
 router.post(
   "/",
   authenticateToken,
-  authorizeRole("admin"),
+  authorizeRole("admin", "proprietor"),
   checkStatus,
   classController.createClass,
 );
 router.get(
   "/",
   authenticateToken,
-  authorizeRole("admin", "teacher"),
+  authorizeRole("admin", "proprietor", "teacher"),
   checkStatus,
   classController.getClasses,
 );
 router.get(
   "/:id",
   authenticateToken,
-  authorizeRole("admin", "teacher"),
+  authorizeRole("admin", "proprietor", "teacher"),
   checkStatus,
   classController.getClassById,
 );
 router.patch(
   "/:id",
   authenticateToken,
-  authorizeRole("admin"),
+  authorizeRole("admin", "proprietor"),
   checkStatus,
   classController.updateClass,
 );

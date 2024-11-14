@@ -12,21 +12,21 @@ const router = express.Router();
 router.post(
   "/",
   authenticateToken,
-  authorizeRole("admin"),
+  authorizeRole("admin", "proprietor"),
   checkStatus,
   subjectController.createSubject,
 );
 router.get(
   "/",
   authenticateToken,
-  authorizeRole("admin"),
+  authorizeRole("admin", "proprietor"),
   checkStatus,
   subjectController.getSubjects,
 );
 router.get(
   "/:id",
   authenticateToken,
-  authorizeRole("admin", "teacher"),
+  authorizeRole("admin", "proprietor", "teacher"),
   checkStatus,
   subjectController.getSubjectById,
 );
@@ -34,14 +34,14 @@ router.get(
 router.patch(
   "/:id",
   authenticateToken,
-  authorizeRole("admin"),
+  authorizeRole("admin", "proprietor"),
   checkStatus,
   subjectController.updateSubject,
 );
 router.delete(
   "/:id",
   authenticateToken,
-  authorizeRole("admin"),
+  authorizeRole("admin", "proprietor"),
   checkStatus,
   subjectController.deleteSubject,
 );

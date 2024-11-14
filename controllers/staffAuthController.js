@@ -1,172 +1,3 @@
-/*import { StatusCodes } from "http-status-codes";
-import BadRequestError from "../errors/bad-request.js";
-import createTokenUser from "../utils/createTokenUser.js";
-import { attachCookiesToResponse } from "../utils/jwt.js";
-import Staff from "../models/StaffModel.js";
-import Class from "../models/ClassModel.js";
-import Subject from "../models/SubjectModel.js";
-import {
-  generateCurrentTerm,
-  startTermGenerationDate,
-  holidayDurationForEachTerm,
-} from "../utils/termGenerator.js";
-
-// Helper function to validate term and session consistency
-const isValidTermAndSession = (subject, term, session) =>
-  subject.term === term && subject.session === session;
-
-// Helper function to update subject teachers and staff's classes/subjects
-const assignSubjectTeacherAndUpdateClass = async (
-  subject,
-  staff,
-  term,
-  session,
-) => {
-  if (isValidTermAndSession(subject, term, session)) {
-    // Add the current staff as the subject teacher if not already assigned
-    if (!subject.subjectTeachers.includes(staff._id)) {
-      subject.subjectTeachers.push(staff._id);
-    }
-    await subject.save();
-
-    // Add the subject to the staff's subjects list if not already there
-    if (!staff.subjects.includes(subject._id)) {
-      staff.subjects.push(subject._id);
-    }
-
-    // Append the classId of the subject to staff's classes list if not already there
-    const classId = subject.classId.toString();
-    if (!staff.classes.includes(classId)) {
-      staff.classes.push(classId);
-    }
-
-    // Add the teacher to the class's subjectTeachers list if not already there
-    const assignedClass = await Class.findById(classId);
-    if (!assignedClass.subjectTeachers.includes(staff._id)) {
-      assignedClass.subjectTeachers.push(staff._id);
-    }
-
-    // Save the updated class
-    await assignedClass.save();
-  }
-};
-
-export const registerStaff = async (req, res) => {
-  const {
-    name,
-    email,
-    password,
-    role,
-    department,
-    subjects,
-    classes,
-    isClassTeacher, // Should be the class ID where the teacher is a class teacher
-  } = req.body;
-
-  // Validate required fields
-  if (!email || !password || !name || !role) {
-    throw new BadRequestError("Please provide email, password, name, and role");
-  }
-
-  // Check if email already exists
-  const emailAlreadyExists = await Staff.findOne({ email });
-  if (emailAlreadyExists) {
-    throw new BadRequestError("Email already exists");
-  }
-
-  // Generate the current term based on the provided start date and holiday durations
-  const term = generateCurrentTerm(
-    startTermGenerationDate,
-    holidayDurationForEachTerm,
-  );
-
-  try {
-    // Create Staff user
-    const staff = await Staff.create({
-      name,
-      email,
-      password,
-      role,
-      department,
-      subjects,
-      classes,
-      term, // Store the current term
-      isClassTeacher,
-    });
-
-    // Handle class teacher assignment and subject update
-    if (role === "teacher" && isClassTeacher) {
-      const assignedClass = await Class.findById(isClassTeacher);
-      if (!assignedClass) {
-        throw new BadRequestError("Assigned class not found for class teacher");
-      }
-
-      assignedClass.classTeacher = staff._id; // Assign the teacher as class teacher
-      staff.isClassTeacher = assignedClass._id; // Update staff's isClassTeacher field
-
-      // Add classId to staff.classes if not already present
-      const classId = assignedClass._id.toString();
-      if (!staff.classes.includes(classId)) {
-        staff.classes.push(classId);
-      }
-
-      await assignedClass.save(); // Save the updated class
-
-      // Fetch all subjects for this class in the same term and session
-      const classSubjects = await Subject.find({
-        classId: isClassTeacher,
-        term: term,
-        session: staff.session,
-      });
-
-      // Assign subjects to the teacher and update staff classes/subjects
-      for (const subject of classSubjects) {
-        await assignSubjectTeacherAndUpdateClass(
-          subject,
-          staff,
-          term,
-          staff.session,
-        );
-      }
-
-      // Save the updated staff
-      await staff.save();
-    }
-
-    // Handle case where the teacher has specific subjects assigned
-    if (role === "teacher" && subjects && subjects.length > 0) {
-      for (const subjectId of subjects) {
-        const assignedSubject = await Subject.findById(subjectId);
-        if (assignedSubject) {
-          await assignSubjectTeacherAndUpdateClass(
-            assignedSubject,
-            staff,
-            term,
-            staff.session,
-          );
-        }
-      }
-
-      // Save the updated staff
-      await staff.save();
-    }
-
-    // Create token for the new staff
-    const tokenUser = createTokenUser(staff);
-
-    // Attach token to response cookies
-    attachCookiesToResponse({ res, user: tokenUser });
-
-    // Return staff details and token in response
-    res.status(StatusCodes.CREATED).json({
-      staff,
-      token: tokenUser,
-    });
-  } catch (error) {
-    res.status(StatusCodes.BAD_REQUEST).json({ error: error.message });
-  }
-};*/
-
 import { StatusCodes } from "http-status-codes";
 import BadRequestError from "../errors/bad-request.js";
 import createTokenUser from "../utils/createTokenUser.js";
@@ -174,6 +5,7 @@ import { attachCookiesToResponse } from "../utils/jwt.js";
 import Staff from "../models/StaffModel.js";
 import Class from "../models/ClassModel.js";
 import Subject from "../models/SubjectModel.js";
+import Attendance from "../models/AttendanceModel.js"; // Ensure Attendance model is imported
 import {
   generateCurrentTerm,
   startTermGenerationDate,
@@ -330,6 +162,21 @@ export const registerStaff = async (req, res) => {
       }
 
       await assignedClass.save(); // Save the updated class
+
+      // Update attendance records for the assigned class from the current date onward
+      const attendanceUpdateResult = await Attendance.updateMany(
+        {
+          classId: isClassTeacher,
+          term: term,
+          session: staff.session,
+          date: { $gte: new Date() }, // Apply to current and future dates
+        },
+        { $set: { classTeacher: staff._id } },
+      );
+
+      console.log(
+        `Updated ${attendanceUpdateResult.modifiedCount} attendance records with new classTeacher.`,
+      );
 
       // Fetch all subjects for this class in the same term and session
       const classSubjects = await Subject.find({

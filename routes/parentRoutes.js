@@ -11,21 +11,21 @@ const router = express.Router();
 router.get(
   "/",
   authenticateToken,
-  authorizeRole("admin"),
+  authorizeRole("admin", "proprietor"),
   checkStatus,
   parentController.getParents,
 ); // Get all parents
 router.get(
   "/:id",
   authenticateToken,
-  authorizeRole("admin", "teacher", "parent"),
+  authorizeRole("admin", "proprietor", "teacher", "parent", "student"),
   checkStatus,
   parentController.getParentById,
 ); // Get parent by ID
 router.patch(
   "/:id",
   authenticateToken,
-  authorizeRole("admin", "parent"),
+  authorizeRole("admin", "proprietor", "parent"),
   checkStatus,
   parentController.updateParent,
 ); // Update parent
@@ -34,14 +34,14 @@ router.patch(
 router.patch(
   "/:id/status",
   authenticateToken, // Middleware to authenticate the user
-  authorizeRole("admin"), // Only admins can update parent status
+  authorizeRole("admin", "proprietor"), // Only admins can update parent status
   parentController.updateParentStatus,
 );
 
 router.delete(
   "/:id",
   authenticateToken,
-  authorizeRole("admin"),
+  authorizeRole("admin", "proprietor"),
   parentController.deleteParent,
 ); // Delete parent
 

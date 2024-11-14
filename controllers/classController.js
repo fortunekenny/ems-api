@@ -1,4 +1,5 @@
 import Class from "../models/ClassModel.js";
+import Attendance from "../models/AttendanceModel.js";
 import { StatusCodes } from "http-status-codes";
 import BadRequestError from "../errors/bad-request.js";
 import {
@@ -108,7 +109,7 @@ export const updateClass = async (req, res) => {
       timetable,
     } = req.body;
 
-    // Find the class member by ID
+    // Find the class by ID
     const updatedClass = await Class.findOne({ _id: classId });
 
     if (!updatedClass) {
@@ -123,6 +124,10 @@ export const updateClass = async (req, res) => {
     // Check if the current user has permission to update
     checkPermissions(req.user, updatedClass.user);
 
+    // Store the previous class teacher ID for comparison
+    const previousClassTeacherId = updatedClass.classTeacher;
+
+    // Update class fields
     updatedClass.className = className || updatedClass.className;
     updatedClass.section = section || updatedClass.section;
     updatedClass.classTeacher = classTeacher || updatedClass.classTeacher;
@@ -133,7 +138,32 @@ export const updateClass = async (req, res) => {
     updatedClass.term = term || updatedClass.term;
     updatedClass.timetable = timetable || updatedClass.timetable;
 
+    // Save the updated class
     await updatedClass.save();
+
+    // If the class teacher has changed, update staff's classTeacher reference
+    /*if (classTeacher && classTeacher !== previousClassTeacherId?.toString()) {
+      // Find the staff member associated with the new class teacher
+      const staffMember = await Staff.findOne({ _id: classTeacher });
+      if (staffMember) {
+        // Update attendance records for this class
+        const attendanceUpdateResult = await Attendance.updateMany(
+          {
+            classId: classId, // Assuming attendance records use classId to filter
+            date: { $gte: new Date() }, // Change this to the appropriate date condition
+          },
+          { $set: { classTeacher: classTeacher } }, // Set new class teacher ID
+        );
+
+        console.log(
+          `Updated ${attendanceUpdateResult.modifiedCount} attendance records with new classTeacher.`,
+        );
+
+        // Update the staff member's classTeacher
+        staffMember.isClassTeacher = classId; // Assuming this is the relevant field
+        await staffMember.save();
+      }
+    }*/
 
     res.status(StatusCodes.OK).json(updatedClass);
   } catch (error) {
