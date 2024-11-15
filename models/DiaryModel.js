@@ -9,7 +9,7 @@ const diarySchema = new mongoose.Schema({
   teacher: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "Staff",
-    required: true,
+    required: false,
   },
   classId: {
     type: mongoose.Schema.Types.ObjectId,
@@ -62,14 +62,14 @@ diarySchema.pre("validate", function (next) {
     const startDate = startTermGenerationDate; // Use the startTermGenerationDate if no lesson date is provided
 
     // If session or term is not provided, generate them
-    if (!this.session || !this.term || !this.lessonWeek) {
+    if (!this.session || !this.term) {
       const { session, term, weekOfTerm } = getCurrentTermDetails(
         startDate,
         holidayDurationForEachTerm,
       ); // Pass the start date and holiday durations
       if (!this.session) this.session = session; // Set session if not provided
       if (!this.term) this.term = term; // Set term if not provided
-      if (!this.lessonWeek) this.lessonWeek = weekOfTerm + 1; // Set lessonWeek if not provided
+      // if (!this.lessonWeek) this.lessonWeek = weekOfTerm + 1; // Set lessonWeek if not provided
     }
   }
   next();

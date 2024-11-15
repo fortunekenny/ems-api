@@ -10,45 +10,59 @@ import BadRequestError from "../errors/bad-request.js";
 
 export const createDiary = async (req, res, next) => {
   try {
-    // Set teacher to the authenticated user
-    req.body.teacher = req.user.id;
+    const userId = req.user.id;
+    const userRole = req.user.role;
 
-    // Get the term start date
+    // Get the term start date and calculate the one-week creation window
     const { startDate: termStartDate } = getCurrentTermDetails(
       startTermGenerationDate,
       holidayDurationForEachTerm,
     );
 
-    // Calculate the allowed creation window for diary entries
     const oneWeekBeforeTermStart = new Date(termStartDate);
     oneWeekBeforeTermStart.setDate(oneWeekBeforeTermStart.getDate() - 7);
 
-    // Get the current date
     const currentDate = new Date();
 
-    // Check if current date is within the exact one-week window before term start
+    // Check if the current date is within the allowed window for creating diary entries
     if (currentDate < oneWeekBeforeTermStart || currentDate >= termStartDate) {
       throw new BadRequestError(
         "Diary entries can only be created within one week before the term starts.",
       );
     }
 
-    // Retrieve the teacher's document to check assigned subjects
-    const teacher = await Staff.findById(req.user.id).populate("subjects");
+    // Check authorization
+    let isAuthorized = false;
 
-    if (!teacher) {
-      throw new BadRequestError("Teacher not found");
+    if (userRole === "admin" || userRole === "proprietor") {
+      isAuthorized = true;
+    } else if (userRole === "teacher") {
+      // For teachers, validate that the requested subject is assigned to them
+      const teacher = await Staff.findById(userId).populate("subjects");
+      if (!teacher) {
+        throw new BadRequestError("Teacher not found.");
+      }
+
+      isAuthorized = teacher.subjects.some(
+        (subject) => subject.toString() === req.body.subject,
+      );
     }
 
-    // Check if the requested subject is within the teacher's assigned subjects
-    const isSubjectValid = teacher.subjects.some(
-      (subject) => subject.toString() === req.body.subject,
-    );
-
-    if (!isSubjectValid) {
+    if (!isAuthorized) {
       throw new BadRequestError(
-        "Invalid subject: Subject not assigned to this teacher.",
+        "You are not authorized to create this diary entry.",
       );
+    }
+
+    // Assign the teacher field based on the role
+    if (userRole === "teacher") {
+      req.body.teacher = userId;
+    } else if (userRole === "admin" || userRole === "proprietor") {
+      if (!req.body.teacher) {
+        throw new BadRequestError(
+          "For admin or proprietor, the 'teacher' field must be provided.",
+        );
+      }
     }
 
     // Create and save the new diary entry
@@ -57,7 +71,11 @@ export const createDiary = async (req, res, next) => {
 
     res.status(StatusCodes.CREATED).json(diary);
   } catch (error) {
-    next(new BadRequestError(error.message));
+    next(
+      error instanceof BadRequestError
+        ? error
+        : new BadRequestError(error.message),
+    );
   }
 };
 

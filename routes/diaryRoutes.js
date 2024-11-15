@@ -60,6 +60,12 @@ router.patch(
 );
 
 // Route to delete a diary entry by ID
-router.delete("/:id", deleteDiary);
+router.delete(
+  "/:id",
+  authenticateToken,
+  checkStatus,
+  authorizeRole("admin", "proprietor"),
+  deleteDiary,
+);
 
 export default router;

@@ -25,13 +25,11 @@ const lessonNoteSchema = new mongoose.Schema({
     type: Number, // Week number of the term (calculated dynamically)
   },
   topic: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "Diary",
+    type: String,
     required: true,
   },
   subTopic: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "Diary",
+    type: String,
     required: true,
   },
   // lessonDate: {

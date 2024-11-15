@@ -9,17 +9,22 @@ const studentAnswerSchema = new mongoose.Schema({
   student: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "Student", // Reference to the Student model
-    required: [true, "Student ID is required."],
+    required: [false, "Student ID is required."],
   },
   subject: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "Subject", // Reference to the Subject model
-    required: [true, "Subject ID is required."],
+    required: [false, "Subject ID is required."],
+  },
+  lessonNote: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "LessonNote", // Reference to the LessonNote model
+    required: [false, "Please provide a lesson note"],
   },
   question: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "Question", // Reference to the Question model
-    required: [true, "Question ID is required."],
+    required: [false, "Question ID is required."],
   },
   answer: {
     type: String,
@@ -58,11 +63,9 @@ const studentAnswerSchema = new mongoose.Schema({
   },
   session: {
     type: String,
-    required: [true, "Session is required."],
   },
   term: {
     type: String,
-    required: [false, "Term is required."],
   },
   lessonWeek: {
     type: Number, // Week number of the term (calculated dynamically)
@@ -77,7 +80,7 @@ const studentAnswerSchema = new mongoose.Schema({
   },
 });
 
-// Pre-validation hook to check and set session, term, and week of term before validation
+/*// Pre-validation hook to check and set session, term, and week of term before validation
 studentAnswerSchema.pre("validate", function (next) {
   if (this.isNew) {
     const startDate = startTermGenerationDate; // Use createdAt or default start date if no answer date is provided
@@ -97,7 +100,7 @@ studentAnswerSchema.pre("validate", function (next) {
   }
 
   next();
-});
+});*/
 
 // Create the StudentAnswer model
 const StudentAnswer = mongoose.model("StudentAnswer", studentAnswerSchema);

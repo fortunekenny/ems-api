@@ -8,6 +8,8 @@ import BadRequestError from "../errors/bad-request.js";
 export const createLessonNote = async (req, res, next) => {
   try {
     const { lessonWeek, lessonDate } = req.body;
+    const userRole = req.user.role;
+    const userId = req.user.id;
 
     // Get current term details
     const {
@@ -35,36 +37,57 @@ export const createLessonNote = async (req, res, next) => {
     // Lesson notes for the current week cannot be created in the current week itself
     if (lessonWeek === currentWeekOfTerm) {
       throw new BadRequestError(
-        `Lesson notes for the current week (${currentWeekOfTerm}) cannot be created in the same week. This should be in previous week.`,
+        `Lesson notes for the current week (${currentWeekOfTerm}) cannot be created in the same week. This should be in the previous week.`,
       );
     }
 
     // Lesson notes for future weeks (e.g., Week 5, Week 6, etc.) can be created from the current week onward
     if (lessonWeek <= currentWeekOfTerm) {
       throw new BadRequestError(
-        `Lesson notes can only be created for future week (${
+        `Lesson notes can only be created for future weeks (${
           currentWeekOfTerm + 1
         } and beyond).`,
       );
     }
 
-    // Set teacher to the authenticated user
-    req.body.teacher = req.user.id;
+    // Check authorization
+    let isAuthorized = false;
 
-    // Validate subject ownership
-    const teacher = await Staff.findById(req.user.id).populate("subjects");
-    const isSubjectValid = teacher.subjects.some(
-      (subject) => subject.toString() === req.body.subject,
-    );
-    if (!isSubjectValid) {
-      throw new BadRequestError(
-        "Invalid subject: Subject not assigned to this teacher.",
+    if (userRole === "admin" || userRole === "proprietor") {
+      isAuthorized = true;
+    } else if (userRole === "teacher") {
+      // For teachers, validate that the requested subject is assigned to them
+      const teacher = await Staff.findById(userId).populate("subjects");
+      if (!teacher) {
+        throw new BadRequestError("Teacher not found.");
+      }
+
+      isAuthorized = teacher.subjects.some(
+        (subject) => subject.toString() === req.body.subject,
       );
+    }
+
+    if (!isAuthorized) {
+      throw new BadRequestError(
+        "You are not authorized to create this lesson note.",
+      );
+    }
+
+    // Assign the teacher field based on the role
+    if (userRole === "teacher") {
+      req.body.teacher = userId;
+    } else if (userRole === "admin" || userRole === "proprietor") {
+      if (!req.body.teacher) {
+        throw new BadRequestError(
+          "For admin or proprietor, the 'teacher' field must be provided.",
+        );
+      }
     }
 
     // Create and save the new lesson note
     const lessonNote = new LessonNote(req.body);
     await lessonNote.save();
+
     res.status(StatusCodes.CREATED).json(lessonNote);
   } catch (error) {
     next(
@@ -213,12 +236,39 @@ export const getLessonNoteByWeek = async (req, res, next) => {
 // Update a lesson note
 export const updateLessonNote = async (req, res, next) => {
   try {
-    // Get the current user ID (assumes the user is authenticated)
-    const teacherId = req.user.id;
+    // Get the current user ID and role (assumes the user is authenticated)
+    const userId = req.user.id;
+    const userRole = req.user.role;
 
-    // Check if the subject in req.body is assigned to the teacher
-    if (req.body.subject) {
-      const teacher = await Staff.findById(teacherId).populate("subjects");
+    // Fetch the existing lesson note to validate authorization
+    const lessonNote = await LessonNote.findById(req.params.id).populate({
+      path: "subject",
+      model: "Subject",
+    });
+
+    if (!lessonNote) {
+      throw new NotFoundError("Lesson note not found.");
+    }
+
+    // Authorization: Allow updates only if the user is:
+    // - A teacher who owns the subject
+    // - An admin or proprietor
+    const isAuthorized =
+      userRole === "admin" ||
+      userRole === "proprietor" ||
+      (userRole === "teacher" &&
+        lessonNote.subject &&
+        lessonNote.subject.subjectTeachers.includes(userId));
+
+    if (!isAuthorized) {
+      throw new BadRequestError(
+        "You are not authorized to update this lesson note.",
+      );
+    }
+
+    /*    // If the `subject` field is in the request body, validate it for teachers
+    if (req.body.subject && userRole === "teacher") {
+      const teacher = await Staff.findById(userId).populate("subjects");
       if (!teacher) {
         throw new BadRequestError("Teacher not found.");
       }
@@ -232,26 +282,22 @@ export const updateLessonNote = async (req, res, next) => {
           "Invalid subject: Subject not assigned to this teacher.",
         );
       }
-    }
+    }*/
 
-    // Ensure the teacher field in the update remains the same as the current user
-    req.body.teacher = teacherId;
+    // Ensure the `teacher` field remains the same as the current user for teachers
+    // Assign the teacher field based on the role
 
     // Find the lesson note by ID and update it
-    const lessonNote = await LessonNote.findByIdAndUpdate(
+    const updatedLessonNote = await LessonNote.findByIdAndUpdate(
       req.params.id,
       req.body,
       { new: true, runValidators: true },
     );
 
-    if (!lessonNote) {
-      throw new NotFoundError("Lesson note not found");
-    }
-
-    res.status(StatusCodes.OK).json(lessonNote);
+    res.status(StatusCodes.OK).json(updatedLessonNote);
   } catch (error) {
     next(
-      error instanceof NotFoundError
+      error instanceof NotFoundError || error instanceof BadRequestError
         ? error
         : new BadRequestError(error.message),
     );

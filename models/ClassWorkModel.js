@@ -11,9 +11,14 @@ const classWorkSchema = new mongoose.Schema({
     ref: "Staff", // Reference to Staff (Teacher only)
     required: true,
   },
-  class: {
+  lessonNote: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: "Class",
+    ref: "LessonNote", // Reference to the LessonNote model
+    required: [true, "Please provide a lesson note"],
+  },
+  classId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "ClassId",
     required: true,
   },
   subject: {
@@ -24,19 +29,29 @@ const classWorkSchema = new mongoose.Schema({
   lessonWeek: {
     type: Number, // Week number of the term (calculated dynamically)
   },
-  topic: { type: mongoose.Schema.Types.ObjectId, ref: "LessonNote" },
-  sunTopic: [{ type: mongoose.Schema.Types.ObjectId, ref: "LessonNote" }],
+  topic: {
+    type: String,
+    required: true,
+  },
+  subTopic: {
+    type: String,
+    required: true,
+  },
   questions: [{ type: mongoose.Schema.Types.ObjectId, ref: "Questions" }],
   dueDate: { type: Date, required: true },
   students: [{ type: mongoose.Schema.Types.ObjectId, ref: "Student" }], // List of students who received the classWork
   submitted: [{ type: mongoose.Schema.Types.ObjectId, ref: "Student" }], // List of students who submitted
-  session: { type: String, required: true }, // e.g., 2023/2024
-  term: { type: String, required: true }, // e.g., First, Second, Third
+  lessonWeek: {
+    type: Number, // Week number of the term (calculated dynamically)
+    required: true,
+  },
+  session: { type: String }, // e.g., 2023/2024
+  term: { type: String }, // e.g., First, Second, Third
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now },
 });
 
-// Pre-validation hook to auto-generate session, term, if they are not provided
+/*// Pre-validation hook to auto-generate session, term, if they are not provided
 lessonNoteSchema.pre("validate", function (next) {
   if (this.isNew) {
     const startDate = startTermGenerationDate; // Use the startTermGenerationDate if no lesson date is provided
@@ -53,7 +68,7 @@ lessonNoteSchema.pre("validate", function (next) {
     }
   }
   next();
-});
+});*/
 
 const Classwork = mongoose.model("Classwork", classWorkSchema);
 
