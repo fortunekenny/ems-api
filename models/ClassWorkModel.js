@@ -9,7 +9,7 @@ const classWorkSchema = new mongoose.Schema({
   subjectTeacher: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "Staff", // Reference to Staff (Teacher only)
-    required: true,
+    required: false,
   },
   lessonNote: {
     type: mongoose.Schema.Types.ObjectId,
@@ -19,31 +19,39 @@ const classWorkSchema = new mongoose.Schema({
   classId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "ClassId",
-    required: true,
+    required: false,
   },
   subject: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "Subject",
-    required: true,
+    required: false,
   },
   lessonWeek: {
     type: Number, // Week number of the term (calculated dynamically)
   },
   topic: {
     type: String,
-    required: true,
+    required: false,
   },
   subTopic: {
     type: String,
-    required: true,
+    required: false,
   },
-  questions: [{ type: mongoose.Schema.Types.ObjectId, ref: "Questions" }],
+  questions: [
+    { type: mongoose.Schema.Types.ObjectId, ref: "Questions", required: true },
+  ],
   dueDate: { type: Date, required: true },
   students: [{ type: mongoose.Schema.Types.ObjectId, ref: "Student" }], // List of students who received the classWork
-  submitted: [{ type: mongoose.Schema.Types.ObjectId, ref: "Student" }], // List of students who submitted
-  lessonWeek: {
-    type: Number, // Week number of the term (calculated dynamically)
-    required: true,
+  submitted: [
+    {
+      student: { type: mongoose.Schema.Types.ObjectId, ref: "Student" },
+      submittedAt: { type: Date, default: Date.now },
+    },
+  ],
+  status: {
+    type: String,
+    enum: ["pending", "completed", "overdue"],
+    default: "pending",
   },
   session: { type: String }, // e.g., 2023/2024
   term: { type: String }, // e.g., First, Second, Third
