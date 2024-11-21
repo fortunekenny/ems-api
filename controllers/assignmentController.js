@@ -141,52 +141,95 @@ export const getAssignmentById = async (req, res, next) => {
 // Update an assignment
 export const updateAssignment = async (req, res) => {
   try {
-    const {
-      title,
-      description,
-      dueDate,
-      teacher,
-      class: classId,
-      students,
-      session,
-      term,
-    } = req.body;
+    const { id } = req.params;
+    const userId = req.user.id;
+    const userRole = req.user.role;
 
-    const updatedAssignment = await Assignment.findByIdAndUpdate(
-      req.params.id,
-      {
-        title,
-        description,
-        dueDate,
-        teacher,
-        class: classId,
-        students,
-        session,
-        term,
-        updatedAt: Date.now(),
-      },
-      { new: true },
-    );
-
-    if (!updatedAssignment) {
-      return res.status(404).json({ message: "Assignment not found" });
+    const assignment = await Assignment.findById(id).populate("lessonNote");
+    if (!assignment) {
+      throw new NotFoundError("Assignment not found");
     }
-    res.json(updatedAssignment);
+
+    // Check authorization
+    const isAuthorized =
+      userRole === "admin" ||
+      userRole === "proprietor" ||
+      (userRole === "teacher" &&
+        assignment.lessonNote.subject &&
+        assignment.lessonNote.subject.subjectTeachers.includes(userId));
+
+    if (!isAuthorized) {
+      throw new BadRequestError(
+        "You are not authorized to update this assignment.",
+      );
+    }
+
+    const updatedAssignment = await Assignment.findByIdAndUpdate(id, req.body, {
+      new: true,
+      runValidators: true,
+    });
+
+    res.status(StatusCodes.OK).json(updatedAssignment);
   } catch (error) {
-    res.status(400).json({ message: error.message });
+    next(new BadRequestError(error.message));
+  }
+};
+
+export const submitAssignment = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.id;
+
+    const assignment = await Assignment.findById(id);
+    if (!assignment) {
+      throw new NotFoundError("Assignment not found");
+    }
+
+    // Check if the student is part of the class
+    if (!assignment.students.includes(userId)) {
+      throw new BadRequestError("You are not authorized to this assignment.");
+    }
+
+    const alreadySubmitted = assignment.submitted.find(
+      (submission) => submission.student.toString() === userId,
+    );
+    if (alreadySubmitted) {
+      throw new BadRequestError("You have already submitted this assignment.");
+    }
+
+    // Add submission
+    assignment.submitted.push({ student: userId });
+
+    // Update status based on due date
+    if (new Date(assignment.dueDate) > new Date()) {
+      assignment.status = "completed";
+    } else {
+      assignment.status = "overdue";
+    }
+
+    await assignment.save();
+
+    res
+      .status(StatusCodes.OK)
+      .json({ message: "Assignment submitted successfully." });
+  } catch (error) {
+    next(new BadRequestError(error.message));
   }
 };
 
 // Delete an assignment
 export const deleteAssignment = async (req, res) => {
   try {
-    const assignment = await Assignment.findByIdAndDelete(req.params.id);
+    const assignment = await Assignment.findByIdAndDelete(id);
 
     if (!assignment) {
-      return res.status(404).json({ message: "Assignment not found" });
+      throw new NotFoundError("Assignment not found.");
     }
-    res.json({ message: "Assignment deleted" });
+
+    res
+      .status(StatusCodes.OK)
+      .json({ message: "Assignment deleted successfully" });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    next(new BadRequestError(error.message));
   }
 };

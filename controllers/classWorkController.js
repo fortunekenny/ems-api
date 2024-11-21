@@ -21,6 +21,7 @@ export const createClassWork = async (req, res, next) => {
       session,
       term,
     } = req.body;
+
     const userId = req.user.id;
     const userRole = req.user.role;
 
@@ -174,13 +175,11 @@ export const updateClassWork = async (req, res, next) => {
       runValidators: true,
     });
 
-    res.status(StatusCodes.OK).json(updatedClassWork);
+    res
+      .status(StatusCodes.OK)
+      .json({ message: "class work updated successfully.", updatedClassWork });
   } catch (error) {
-    next(
-      error instanceof BadRequestError || error instanceof NotFoundError
-        ? error
-        : new BadRequestError(error.message),
-    );
+    next(new BadRequestError(error.message));
   }
 };
 
@@ -221,7 +220,7 @@ export const submitClassWork = async (req, res, next) => {
       .status(StatusCodes.OK)
       .json({ message: "ClassWork submitted successfully." });
   } catch (error) {
-    next(error);
+    next(new BadRequestError(error.message));
   }
 };
 

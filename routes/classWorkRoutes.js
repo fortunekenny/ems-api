@@ -23,6 +23,7 @@ router.post(
   authorizeRole("admin", "proprietor", "teacher"),
   createClassWork,
 ); // Create ClassWork
+
 router.post(
   "/:id/submit",
   authenticateToken,
@@ -30,6 +31,7 @@ router.post(
   authorizeRole("admin", "proprietor", "student"),
   submitClassWork,
 ); // Route to submit ClassWork
+
 router.get(
   "/",
   authenticateToken,

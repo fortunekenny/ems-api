@@ -2,45 +2,57 @@ import express from "express";
 import {
   authenticateToken,
   authorizeRole,
-} from "../middleware/authentication.js"; // Check if the file path is correct
+} from "../middleware/authentication.js";
+import { checkStatus } from "../utils/checkStatus.js";
 import * as assignmentController from "../controllers/assignmentController.js"; // Ensure this path is also correct
 
 const router = express.Router();
-
-// Role-based constants
-const ADMIN = "admin";
-const STAFF = "staff";
-const STUDENT = "student";
 
 // Assignment routes
 router.post(
   "/",
   authenticateToken,
-  authorizeRole(ADMIN, STAFF),
+  checkStatus,
+  authorizeRole("admin", "proprietor", "teacher"),
   assignmentController.createAssignment,
 );
+router.post(
+  "/:id/submit",
+  authenticateToken,
+  checkStatus,
+  authorizeRole("admin", "proprietor", "student"),
+  assignmentController.submitAssignment,
+); // Route to submit assignment
+
 router.get(
   "/",
   authenticateToken,
-  authorizeRole(ADMIN, STAFF, STUDENT),
+  checkStatus,
+  authorizeRole("admin", "proprietor", "student", "teacher"),
   assignmentController.getAssignments,
 );
+
 router.get(
   "/:id",
   authenticateToken,
-  authorizeRole(ADMIN, STAFF, STUDENT),
+  checkStatus,
+  authorizeRole("admin", "proprietor", "student", "teacher"),
   assignmentController.getAssignmentById,
 );
+
 router.patch(
   "/:id",
   authenticateToken,
-  authorizeRole(ADMIN, STAFF),
+  checkStatus,
+  authorizeRole("admin", "proprietor", "teacher"),
   assignmentController.updateAssignment,
 );
+
 router.delete(
   "/:id",
   authenticateToken,
-  authorizeRole(ADMIN),
+  checkStatus,
+  authorizeRole("admin", "proprietor"),
   assignmentController.deleteAssignment,
 );
 
