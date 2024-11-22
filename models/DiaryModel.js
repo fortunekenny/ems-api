@@ -6,7 +6,7 @@ import {
 } from "../utils/termGenerator.js"; // Import getCurrentTermDetails
 
 const diarySchema = new mongoose.Schema({
-  teacher: {
+  subjectTeacher: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "Staff",
     required: false,

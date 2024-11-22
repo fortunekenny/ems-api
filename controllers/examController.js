@@ -2,6 +2,8 @@
 import { StatusCodes } from "http-status-codes";
 import Exam from "../models/ExamModel.js";
 import Staff from "../models/StaffModel.js";
+import Student from "../models/StudentModel.js";
+import Subject from "../models/SubjectModel.js";
 import BadRequestError from "../errors/bad-request.js";
 import NotFoundError from "../errors/not-found.js";
 
@@ -119,7 +121,7 @@ export const getExamById = async (req, res, next) => {
 
     const exam = await Exam.findById(id).populate("questions class subjects");
     if (!exam) {
-      throw new NotFoundError("ClassWork not found.");
+      throw new NotFoundError("Exam not found.");
     }
     res.status(StatusCodes.OK).json(exam);
   } catch (error) {
@@ -169,14 +171,130 @@ export const updateExam = async (req, res, next) => {
   }
 };
 
+export const submitExam = async (req, res, next) => {
+  try {
+    const { id } = req.params; // Exam ID
+
+    const userId = req.user.id;
+    const userRole = req.user.role;
+
+    // Check if the authenticated user is authorized
+    let studentId;
+    let isAuthorized = false;
+
+    if (userRole === "admin" || userRole === "proprietor") {
+      isAuthorized = true;
+      studentId = req.body.studentId;
+
+      // Ensure 'student' field is provided
+      if (!studentId) {
+        throw new BadRequestError(
+          "For admin or proprietor, the 'studentId' field must be provided.",
+        );
+      }
+
+      // Validate that the student exists and is valid
+      const student = await Student.findById(studentId).populate("subjects");
+      if (!student) {
+        throw new NotFoundError("Provided student not found.");
+      }
+
+      const exam = await Exam.findById(id);
+      if (!exam) throw new NotFoundError("Exam not found.");
+
+      // Check if the student is in the exam's students list for the specified term and session
+      const isStudentInExam = exam.students.some((examStudent) => {
+        return (
+          examStudent.student.toString() === studentId.toString() &&
+          examStudent.term === exam.term &&
+          examStudent.session === exam.session
+        );
+      });
+
+      if (!isStudentInExam) {
+        throw new BadRequestError(
+          "The specified student is not part of this exam's student list for the current term and session.",
+        );
+      }
+
+      // Check if already submitted
+      const alreadySubmitted = exam.submitted.find(
+        (submission) => submission.student.toString() === studentId,
+      );
+      if (alreadySubmitted) {
+        throw new BadRequestError("Exam is already submitted.");
+      }
+
+      // Add submission
+      exam.submitted.push({ student: studentId });
+
+      // Update status based on due date
+
+      exam.status = "submitted";
+
+      await exam.save();
+    } else if (userRole === "student") {
+      isAuthorized = true;
+      studentId = userId;
+
+      const exam = await Exam.findById(id);
+      if (!exam) throw new NotFoundError("Exam not found.");
+
+      // Check if the student is in the exam's students list for the specified term and session
+      const isStudentInExam = exam.students.some((examStudent) => {
+        return (
+          examStudent.student.toString() === studentId.toString() &&
+          examStudent.term === exam.term &&
+          examStudent.session === exam.session
+        );
+      });
+
+      if (!isStudentInExam) {
+        throw new BadRequestError(
+          "The specified student is not part of this exam's student list for the current term and session.",
+        );
+      }
+
+      // Check if already submitted
+      const alreadySubmitted = exam.submitted.find(
+        (submission) => submission.student.toString() === userId,
+      );
+      if (alreadySubmitted) {
+        throw new BadRequestError("You have already submitted this exam.");
+      }
+
+      // Add submission
+      exam.submitted.push({ student: userId });
+
+      // Update status based on due date
+
+      exam.status = "submitted";
+
+      await exam.save();
+    }
+
+    res
+      .status(StatusCodes.OK)
+      .json({ message: "Exam submitted successfully." });
+  } catch (error) {
+    next(new BadRequestError(error.message));
+  }
+};
+
 // Delete an exam
 export const deleteExam = async (req, res) => {
   try {
-    const exam = await Exam.findByIdAndDelete(req.params.id);
-    if (!exam) return res.status(404).json({ error: "Exam not found" });
-    res.status(200).json({ message: "Exam deleted successfully" });
+    const { id } = req.params;
+
+    const exam = await Exam.findByIdAndDelete(id);
+
+    if (!exam) {
+      throw new NotFoundError("Exam not found.");
+    }
+
+    res.status(StatusCodes.OK).json({ message: "Exam deleted successfully." });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    next(new BadRequestError(error.message));
   }
 };
 

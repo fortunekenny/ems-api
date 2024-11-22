@@ -16,6 +16,16 @@ const studentAnswerSchema = new mongoose.Schema({
     ref: "Subject", // Reference to the Subject model
     required: [false, "Subject ID is required."],
   },
+  evaluationType: {
+    type: String,
+    enum: ["Test", "Assignment", "ClassWork", "Exam"],
+    required: [true, "Evaluation type is required."],
+  },
+  evaluationTypeId: {
+    type: mongoose.Schema.Types.ObjectId,
+    // ref: ["Test", "Assignment", "ClassWork", "Exam"],
+    required: [true, "Evaluation ID is required."],
+  },
   lessonNote: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "LessonNote", // Reference to the LessonNote model
@@ -59,7 +69,7 @@ const studentAnswerSchema = new mongoose.Schema({
   classId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "Class", // Reference to the Class model
-    required: [true, "Class ID is required."],
+    // required: [true, "Class ID is required."],
   },
   session: {
     type: String,
@@ -80,7 +90,7 @@ const studentAnswerSchema = new mongoose.Schema({
   },
 });
 
-/*// Pre-validation hook to check and set session, term, and week of term before validation
+// Pre-validation hook to check and set session, term, and week of term before validation
 studentAnswerSchema.pre("validate", function (next) {
   if (this.isNew) {
     const startDate = startTermGenerationDate; // Use createdAt or default start date if no answer date is provided
@@ -100,7 +110,7 @@ studentAnswerSchema.pre("validate", function (next) {
   }
 
   next();
-});*/
+});
 
 // Create the StudentAnswer model
 const StudentAnswer = mongoose.model("StudentAnswer", studentAnswerSchema);

@@ -3,44 +3,54 @@ import {
   authenticateToken,
   authorizeRole,
 } from "../middleware/authentication.js";
+import { checkStatus } from "../utils/checkStatus.js";
 import * as examController from "../controllers/examController.js";
 
 const router = express.Router();
-
-// Role-based constants
-const ADMIN = "admin";
-const STAFF = "staff";
-const STUDENT = "student";
 
 // Exam routes
 router.post(
   "/",
   authenticateToken,
-  authorizeRole(ADMIN, STAFF),
+  checkStatus,
+  authorizeRole("admin", "proprietor", "teacher"),
   examController.createExam,
 );
+
+router.post(
+  "/:id/submit",
+  authenticateToken,
+  checkStatus,
+  authorizeRole("admin", "proprietor", "student"),
+  examController.submitExam,
+); // Route to submit ClassWork
+
 router.get(
   "/",
   authenticateToken,
-  authorizeRole(ADMIN, STAFF),
+  checkStatus,
+  authorizeRole("admin", "proprietor", "teacher"),
   examController.getExams,
 );
 router.get(
   "/:id",
   authenticateToken,
-  authorizeRole(ADMIN, STAFF, STUDENT),
+  checkStatus,
+  authorizeRole("admin", "proprietor", "teacher", "student"),
   examController.getExamById,
 );
 router.patch(
   "/:id",
   authenticateToken,
-  authorizeRole(ADMIN, STAFF),
+  checkStatus,
+  authorizeRole("admin", "proprietor", "teacher"),
   examController.updateExam,
 );
 router.delete(
   "/:id",
   authenticateToken,
-  authorizeRole(ADMIN),
+  checkStatus,
+  authorizeRole("admin", "proprietor"),
   examController.deleteExam,
 );
 

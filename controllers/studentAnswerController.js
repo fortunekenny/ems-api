@@ -26,18 +26,12 @@ export const createStudentAnswer = async (req, res) => {
   // Extract related details for session, term, and classId
   const lessonNote = questionExists.lessonNote;
   const classId = questionExists.classId;
-  const session = questionExists.session;
-  const term = questionExists.term;
-  const lessonWeek = questionExists.lessonWeek;
 
   // Create the student answer
   const studentAnswer = await StudentAnswer.create({
     ...req.body,
     lessonNote,
     classId,
-    session,
-    term,
-    lessonWeek,
   });
 
   res.status(StatusCodes.CREATED).json({ studentAnswer });

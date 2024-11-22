@@ -37,6 +37,7 @@ const examSchema = new mongoose.Schema({
     type: Number,
     required: true,
   },
+  studentId: { type: mongoose.Schema.Types.ObjectId, ref: "Student" }, // Id of student who submited this exam
   students: [{ type: mongoose.Schema.Types.ObjectId, ref: "Student" }], // List of students who are doing this exam
   submitted: [
     {
@@ -48,7 +49,7 @@ const examSchema = new mongoose.Schema({
   term: { type: String, required: true }, // e.g., First, Second, Third
   status: {
     type: String,
-    enum: ["pending", "completed"],
+    enum: ["pending", "submitted"],
     default: "pending",
   },
   createdAt: { type: Date, default: Date.now },

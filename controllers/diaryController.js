@@ -36,6 +36,13 @@ export const createDiary = async (req, res, next) => {
 
     if (userRole === "admin" || userRole === "proprietor") {
       isAuthorized = true;
+
+      // Ensure 'teacher' field is provided for admin or proprietor
+      if (!req.body.subjectTeacher) {
+        throw new BadRequestError(
+          "For admin or proprietor, the 'subjectTeacher' field must be provided.",
+        );
+      }
     } else if (userRole === "teacher") {
       // For teachers, validate that the requested subject is assigned to them
       const teacher = await Staff.findById(userId).populate("subjects");
@@ -46,23 +53,15 @@ export const createDiary = async (req, res, next) => {
       isAuthorized = teacher.subjects.some(
         (subject) => subject.toString() === req.body.subject,
       );
+
+      // Assign the teacher field to the authenticated teacher
+      req.body.subjectTeacher = userId;
     }
 
     if (!isAuthorized) {
       throw new BadRequestError(
         "You are not authorized to create this diary entry.",
       );
-    }
-
-    // Assign the teacher field based on the role
-    if (userRole === "teacher") {
-      req.body.teacher = userId;
-    } else if (userRole === "admin" || userRole === "proprietor") {
-      if (!req.body.teacher) {
-        throw new BadRequestError(
-          "For admin or proprietor, the 'teacher' field must be provided.",
-        );
-      }
     }
 
     // Create and save the new diary entry
@@ -105,22 +104,44 @@ export const getDiaryById = async (req, res, next) => {
 // Update a Diary entry
 export const updateDiary = async (req, res, next) => {
   try {
-    const diary = await Diary.findByIdAndUpdate(req.params.id, req.body, {
+    const { id } = req.params;
+    const userId = req.user.id;
+    const userRole = req.user.role;
+
+    // Fetch the existing Diary
+    const diary = await Diary.findById(id);
+
+    if (!diary) {
+      throw new NotFoundError("Diary not found.");
+    }
+
+    // Check authorization
+    const isAuthorized =
+      userRole === "admin" ||
+      userRole === "proprietor" ||
+      (userRole === "teacher" &&
+        diary.subject &&
+        diary.subject.subjectTeachers.includes(userId));
+
+    if (!isAuthorized) {
+      throw new BadRequestError("You are not authorized to update this diary.");
+    }
+
+    // Update the diary
+    const updatedDiary = await Diary.findByIdAndUpdate(id, req.body, {
       new: true,
       runValidators: true,
     });
-    if (!diary) throw new NotFoundError("Diary entry not found");
-    res.status(StatusCodes.OK).json(diary);
+
+    res
+      .status(StatusCodes.OK)
+      .json({ message: "diary updated successfully.", updatedDiary });
   } catch (error) {
-    next(
-      error instanceof NotFoundError
-        ? error
-        : new BadRequestError(error.message),
-    );
+    next(new BadRequestError(error.message));
   }
 };
 
-export const approveDiary = async (req, res) => {
+export const approveDiary = async (req, res, next) => {
   const { diaryId } = req.params; // Get diary ID from the URL params
 
   if (!diaryId) {
@@ -157,9 +178,7 @@ export const approveDiary = async (req, res) => {
     });
   } catch (error) {
     console.error("Error approving diary:", error);
-    res
-      .status(StatusCodes.INTERNAL_SERVER_ERROR)
-      .json({ error: error.message });
+    next(new BadRequestError(error.message));
   }
 };
 
