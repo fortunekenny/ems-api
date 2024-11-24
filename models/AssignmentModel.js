@@ -40,6 +40,7 @@ const assignmentSchema = new mongoose.Schema({
       submittedAt: { type: Date, default: Date.now },
     },
   ], // List of students who submitted
+  evaluationType: { type: String, required: false, default: "Assignment" },
   dueDate: { type: Date, required: true },
   status: {
     type: String,

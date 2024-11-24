@@ -110,7 +110,7 @@ export const createQuestion = async (req, res, next) => {
 
     // If the questionType is "file-upload," save file details
     if (questionType === "file-upload" && req.file) {
-      const { path: fileUrl, mimetype, size } = req.file; // Extract file details
+      const { path: fileUrl } = req.file; // Extract file details
 
       // Check allowed mimetypes
       const allowedTypes = [
@@ -119,16 +119,21 @@ export const createQuestion = async (req, res, next) => {
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       ];
-      if (!allowedTypes.includes(mimetype)) {
+      if (!allowedTypes.includes(req.file.mimetype)) {
         throw new BadRequestError("Invalid file type.");
       }
 
+      // Check that the file size is not more than 3MB (3MB = 3 * 1024 * 1024 bytes)
+      if (req.file.size > 3 * 1024 * 1024) {
+        throw new BadRequestError("File size must not exceed 3MB.");
+      }
+
       // Add file details to the question
-      questionData.file = {
-        url: fileUrl,
-        fileType: mimetype.split("/")[1], // Extract type (e.g., pdf, doc)
-        fileSize: size,
-      };
+      questionData.files = [
+        {
+          url: fileUrl, // Only store the file URL
+        },
+      ];
     }
 
     // Create the question

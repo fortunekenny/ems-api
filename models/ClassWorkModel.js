@@ -48,6 +48,7 @@ const classWorkSchema = new mongoose.Schema({
       submittedAt: { type: Date, default: Date.now },
     },
   ],
+  evaluationType: { type: String, required: false, default: "ClassWork" },
   status: {
     type: String,
     enum: ["pending", "completed", "overdue"],

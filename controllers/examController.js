@@ -4,6 +4,7 @@ import Exam from "../models/ExamModel.js";
 import Staff from "../models/StaffModel.js";
 import Student from "../models/StudentModel.js";
 import Subject from "../models/SubjectModel.js";
+import StudentAnswer from "../models/StudentAnswerModel.js"; // Adjust the path as needed
 import BadRequestError from "../errors/bad-request.js";
 import NotFoundError from "../errors/not-found.js";
 
@@ -174,112 +175,155 @@ export const updateExam = async (req, res, next) => {
 export const submitExam = async (req, res, next) => {
   try {
     const { id } = req.params; // Exam ID
-
     const userId = req.user.id;
     const userRole = req.user.role;
 
-    // Check if the authenticated user is authorized
-    let studentId;
-    let isAuthorized = false;
+    let studentId = userId; // Default to the authenticated user for students
 
     if (userRole === "admin" || userRole === "proprietor") {
-      isAuthorized = true;
       studentId = req.body.studentId;
 
-      // Ensure 'student' field is provided
       if (!studentId) {
         throw new BadRequestError(
           "For admin or proprietor, the 'studentId' field must be provided.",
         );
       }
 
-      // Validate that the student exists and is valid
-      const student = await Student.findById(studentId).populate("subjects");
+      // Validate the student exists
+      const student = await Student.findById(studentId);
       if (!student) {
         throw new NotFoundError("Provided student not found.");
       }
-
-      const exam = await Exam.findById(id);
-      if (!exam) throw new NotFoundError("Exam not found.");
-
-      // Check if the student is in the exam's students list for the specified term and session
-      const isStudentInExam = exam.students.some((examStudent) => {
-        return (
-          examStudent.student.toString() === studentId.toString() &&
-          examStudent.term === exam.term &&
-          examStudent.session === exam.session
-        );
-      });
-
-      if (!isStudentInExam) {
-        throw new BadRequestError(
-          "The specified student is not part of this exam's student list for the current term and session.",
-        );
-      }
-
-      // Check if already submitted
-      const alreadySubmitted = exam.submitted.find(
-        (submission) => submission.student.toString() === studentId,
-      );
-      if (alreadySubmitted) {
-        throw new BadRequestError("Exam is already submitted.");
-      }
-
-      // Add submission
-      exam.submitted.push({ student: studentId });
-
-      // Update status based on due date
-
-      exam.status = "submitted";
-
-      await exam.save();
-    } else if (userRole === "student") {
-      isAuthorized = true;
-      studentId = userId;
-
-      const exam = await Exam.findById(id);
-      if (!exam) throw new NotFoundError("Exam not found.");
-
-      // Check if the student is in the exam's students list for the specified term and session
-      const isStudentInExam = exam.students.some((examStudent) => {
-        return (
-          examStudent.student.toString() === studentId.toString() &&
-          examStudent.term === exam.term &&
-          examStudent.session === exam.session
-        );
-      });
-
-      if (!isStudentInExam) {
-        throw new BadRequestError(
-          "The specified student is not part of this exam's student list for the current term and session.",
-        );
-      }
-
-      // Check if already submitted
-      const alreadySubmitted = exam.submitted.find(
-        (submission) => submission.student.toString() === userId,
-      );
-      if (alreadySubmitted) {
-        throw new BadRequestError("You have already submitted this exam.");
-      }
-
-      // Add submission
-      exam.submitted.push({ student: userId });
-
-      // Update status based on due date
-
-      exam.status = "submitted";
-
-      await exam.save();
     }
 
-    res
-      .status(StatusCodes.OK)
-      .json({ message: "Exam submitted successfully." });
+    const exam = await Exam.findById(id);
+    if (!exam) throw new NotFoundError("Exam not found.");
+
+    // Check if the student is in the exam's student list for the current term and session
+    const isStudentInExam = exam.students.some((examStudent) => {
+      return (
+        examStudent.student.toString() === studentId.toString() &&
+        examStudent.term === exam.term &&
+        examStudent.session === exam.session
+      );
+    });
+
+    if (!isStudentInExam) {
+      throw new BadRequestError(
+        "The specified student is not part of this exam's student list for the current term and session.",
+      );
+    }
+
+    // Check if already submitted
+    const alreadySubmitted = exam.submitted.find(
+      (submission) => submission.student.toString() === studentId,
+    );
+
+    if (alreadySubmitted) {
+      throw new BadRequestError("This exam has already been submitted.");
+    }
+
+    // Add submission
+    exam.submitted.push({ student: studentId });
+
+    // Update exam status
+    exam.status = "submitted";
+
+    await exam.save();
+
+    res.status(StatusCodes.OK).json({
+      message: "Exam submitted successfully.",
+    });
   } catch (error) {
     next(new BadRequestError(error.message));
   }
 };
+
+export const getExamDetailsWithAnswers = async (req, res, next) => {
+  try {
+    const { id } = req.params; // Exam ID
+
+    // Fetch the exam and populate the questions
+    const exam = await Exam.findById(id).populate("questions");
+    if (!exam) {
+      throw new Error("Exam not found");
+    }
+
+    // Fetch answers for each question
+    const questionsWithAnswers = await Promise.all(
+      exam.questions.map(async (question) => {
+        const answers = await StudentAnswer.find({ question: question._id });
+        return {
+          question: question,
+          answers: answers, // List of answers for this question
+        };
+      }),
+    );
+
+    res.status(200).json({
+      examDetails: exam,
+      questionsWithAnswers,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/*export const getExamWithAnswers = async (req, res, next) => {
+  try {
+    const { id } = req.params; // Exam ID
+    const studentId = req.user.id; // Current student's ID
+
+    // Fetch the exam with populated questions
+    const exam = await Exam.findById(id)
+      .populate({
+        path: "questions", // Populate questions
+        model: "Questions",
+      })
+      .populate("students", "name email") // Populate students for additional data if needed
+      .lean();
+
+    if (!exam) {
+      return res.status(404).json({ message: "Exam not found" });
+    }
+
+    // Fetch answers for the current student's exam
+    const studentAnswers = await StudentAnswer.find({
+      student: studentId,
+      lessonNote: exam.lessonNote, // Assuming answers link to lesson notes
+    }).lean();
+
+    // Map questions with their answers
+    const questionsWithAnswers = exam.questions.map((question) => {
+      const answer = studentAnswers.find(
+        (ans) => ans.question.toString() === question._id.toString(),
+      );
+
+      return {
+        questionText: question.questionText,
+        questionType: question.questionType,
+        options: question.options || null,
+        correctAnswer: question.correctAnswer || null,
+        marks: question.marks,
+        studentAnswer: answer ? answer.answer : null, // Answer provided by the student
+        isCorrect: answer ? answer.isCorrect : null, // Whether the answer is correct
+        marksAwarded: answer ? answer.marksAwarded : 0, // Marks given for this answer
+      };
+    });
+
+    res.status(200).json({
+      examId: exam._id,
+      subject: exam.subject,
+      classId: exam.classId,
+      session: exam.session,
+      term: exam.term,
+      evaluationType: exam.evaluationType,
+      questions: questionsWithAnswers,
+    });
+  } catch (error) {
+    next(error);
+  }
+};*/
 
 // Delete an exam
 export const deleteExam = async (req, res) => {
@@ -297,6 +341,75 @@ export const deleteExam = async (req, res) => {
     next(new BadRequestError(error.message));
   }
 };
+
+/*
+export const submitExam = async (req, res, next) => {
+  try {
+    const { id } = req.params; // Exam ID
+    const userId = req.user.id;
+    const userRole = req.user.role;
+
+    let studentId = userId; // Default to the authenticated user for students
+
+    if (userRole === "admin" || userRole === "proprietor") {
+      studentId = req.body.studentId;
+
+      if (!studentId) {
+        throw new BadRequestError(
+          "For admin or proprietor, the 'studentId' field must be provided."
+        );
+      }
+
+      // Validate the student exists
+      const student = await Student.findById(studentId);
+      if (!student) {
+        throw new NotFoundError("Provided student not found.");
+      }
+    }
+
+    const exam = await Exam.findById(id);
+    if (!exam) throw new NotFoundError("Exam not found.");
+
+    // Check if the student is in the exam's student list for the current term and session
+    const isStudentInExam = exam.students.some((examStudent) => {
+      return (
+        examStudent.student.toString() === studentId.toString() &&
+        examStudent.term === exam.term &&
+        examStudent.session === exam.session
+      );
+    });
+
+    if (!isStudentInExam) {
+      throw new BadRequestError(
+        "The specified student is not part of this exam's student list for the current term and session."
+      );
+    }
+
+    // Check if already submitted
+    const alreadySubmitted = exam.submitted.find(
+      (submission) => submission.student.toString() === studentId
+    );
+
+    if (alreadySubmitted) {
+      throw new BadRequestError("This exam has already been submitted.");
+    }
+
+    // Add submission
+    exam.submitted.push({ student: studentId });
+
+    // Update exam status
+    exam.status = "submitted";
+
+    await exam.save();
+
+    res.status(StatusCodes.OK).json({
+      message: "Exam submitted successfully.",
+    });
+  } catch (error) {
+    next(new BadRequestError(error.message));
+  }
+}; adjust code such that createStudentAnswer controller is initiated for all question in exam. Questions list with the following details student is studentId, subject is exam. Subject, evaluationType is exam.evaluationType, evaluationTypeId is id, question is question._id, answer is exam.answer
+*/
 
 /*
 Example Payload for Admin/Proprietor

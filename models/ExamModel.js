@@ -45,6 +45,7 @@ const examSchema = new mongoose.Schema({
       submittedAt: { type: Date, default: Date.now },
     },
   ], // list of students who have submitted exam
+  evaluationType: { type: String, required: false, default: "Exam" },
   session: { type: String, required: true }, // e.g., 2023/2024
   term: { type: String, required: true }, // e.g., First, Second, Third
   status: {

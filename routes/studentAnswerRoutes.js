@@ -4,6 +4,7 @@ import {
   getAnswersForStudentAndSubject,
   updateStudentAnswer,
   deleteStudentAnswer,
+  getStudentAnswersByEvaluation,
 } from "../controllers/studentAnswerController.js";
 import {
   authenticateToken,
@@ -28,6 +29,13 @@ router.get(
   authorizeRole("admin", "teacher", "proprietor", "student"),
   getAnswersForStudentAndSubject,
 ); // Fetch answers by student and subject
+router.get(
+  "/student/:studentId/evaluation/:evaluationTypeId/answers",
+  authenticateToken,
+  checkStatus,
+  authorizeRole("admin", "teacher", "proprietor"),
+  getStudentAnswersByEvaluation,
+);
 router.patch(
   "/:id",
   authenticateToken,

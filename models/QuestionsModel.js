@@ -177,7 +177,17 @@ const questionSchema = new mongoose.Schema({
         "Correct answer must match one of the options or be valid for the question type.",
     },
   },
-  file: {
+  files: [
+    {
+      url: {
+        type: String, // URL for the file stored in Cloudinary
+        required: function () {
+          return this.questionType === "file-upload";
+        },
+      },
+    },
+  ],
+  /*file: {
     url: {
       type: String, // URL for the file stored in Cloudinary
       required: function () {
@@ -203,7 +213,7 @@ const questionSchema = new mongoose.Schema({
         message: "File size must not exceed 5MB",
       },
     },
-  },
+  },*/
   marks: {
     type: Number,
     required: [true, "Please provide the marks for the question"],
