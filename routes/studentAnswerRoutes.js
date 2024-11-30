@@ -11,17 +11,26 @@ import {
   authorizeRole,
 } from "../middleware/authentication.js";
 import { checkStatus } from "../utils/checkStatus.js";
+import upload from "../cloudinaryConfiguration.js";
 
 const router = express.Router();
 
 // Routes for student answers
-router.post(
+/*router.post(
   "/",
   authenticateToken,
   checkStatus,
   authorizeRole("admin", "teacher", "proprietor"),
   createStudentAnswer,
-); // Create a new student answer
+); // Create a new student */
+router.post(
+  "/",
+  authenticateToken,
+  checkStatus,
+  authorizeRole("admin", "teacher", "proprietor"),
+  upload.array("files", 5), // Middleware to handle up to 5 files
+  createStudentAnswer,
+);
 router.get(
   "/:studentId/:subjectId",
   authenticateToken,
@@ -36,13 +45,22 @@ router.get(
   authorizeRole("admin", "teacher", "proprietor"),
   getStudentAnswersByEvaluation,
 );
-router.patch(
+/*router.patch(
   "/:id",
   authenticateToken,
   checkStatus,
   authorizeRole("admin", "proprietor"),
   updateStudentAnswer,
-); // Update an existing answer
+); // Update an existing answer*/
+router.patch(
+  "/:id",
+  authenticateToken,
+  checkStatus,
+  authorizeRole("admin", "proprietor"),
+  upload.array("files", 5), // Middleware to handle file uploads
+  updateStudentAnswer,
+);
+
 router.delete(
   "/:id",
   authenticateToken,

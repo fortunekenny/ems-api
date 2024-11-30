@@ -1,27 +1,68 @@
 import { StatusCodes } from "http-status-codes";
 import StudentAnswer from "../models/StudentAnswerModel.js";
+import Student from "../models/StudentModel.js";
 import Question from "../models/QuestionsModel.js";
 import BadRequestError from "../errors/bad-request.js";
 import NotFoundError from "../errors/not-found.js";
+import Class from "../models/ClassModel.js";
+import LessonNote from "../models/LessonNoteModel.js";
 
 // Create a new student answer
 
 export const createStudentAnswer = async (req, res, next) => {
   try {
+    const userId = req.user.id; // Authenticated user ID
+    const userRole = req.user.role; // Authenticated user role
+
     const { student, question, answer, evaluationTypeId, evaluationType } =
       req.body;
 
     // Validate required fields
     if (
-      !student ||
       !question ||
-      (!answer && req.file === undefined) || // Answer required unless it's a file-upload
+      (!answer && req.files === undefined) || // Answer required unless it's a file-upload
       !evaluationTypeId ||
       !evaluationType
     ) {
       throw new BadRequestError(
         "Student ID, Question ID, Answer (or file for file-upload), evaluationTypeId, and evaluationType are required.",
       );
+    }
+
+    let studentId;
+    let isAuthorized = false;
+
+    if (userRole === "admin" || userRole === "proprietor") {
+      isAuthorized = true;
+      studentId = req.body.student;
+
+      // Ensure 'student' field is provided
+      if (!studentId) {
+        throw new BadRequestError(
+          "For admin or proprietor, the 'student' field must be provided.",
+        );
+      }
+
+      // Validate that the student exists and is valid
+      const student = await Student.findById(studentId);
+      if (!student) {
+        throw new NotFoundError("Provided student not found.");
+      }
+    } else if (userRole === "student") {
+      student = userId; // Assign the current user as the student
+      // Validate that the student is assigned the subject
+      const student = await Student.findById(student).populate("subjects");
+      if (!student) {
+        throw new NotFoundError("Student not found.");
+      }
+
+      isAuthorized = true;
+
+      if (!isAuthorized) {
+        throw new BadRequestError(
+          "You are not allowed to attempt this question.",
+        );
+      }
     }
 
     // Dynamically determine the evaluation model
@@ -91,9 +132,9 @@ export const createStudentAnswer = async (req, res, next) => {
     const questionType = questionExists.questionType;
 
     // Handle file upload for 'file-upload' questionType
-    let fileData = {};
+    let fileData = [];
     if (questionType === "file-upload") {
-      if (!req.files) {
+      if (!req.files || req.files.length === 0) {
         throw new BadRequestError(
           "File is required for file-upload question type.",
         );
@@ -105,20 +146,21 @@ export const createStudentAnswer = async (req, res, next) => {
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       ];
-      if (!allowedTypes.includes(req.file.mimetype)) {
-        throw new BadRequestError("Invalid file type.");
-      }
 
-      // Check that the file size is not more than 3MB (3MB = 3 * 1024 * 1024 bytes)
-      if (req.file.size > 3 * 1024 * 1024) {
-        throw new BadRequestError("File size must not exceed 3MB.");
-      }
+      // Validate each file
+      req.files.forEach((file) => {
+        if (!allowedTypes.includes(file.mimetype)) {
+          throw new BadRequestError("Invalid file type.");
+        }
 
-      fileData = [
-        {
-          url: fileUrl, // Only store the file URL
-        },
-      ];
+        // Check file size: must not exceed 3MB (3MB = 3 * 1024 * 1024 bytes)
+        if (file.size > 3 * 1024 * 1024) {
+          throw new BadRequestError("File size must not exceed 3MB.");
+        }
+      });
+
+      // Save file data (assuming you're storing file URLs after uploading to Cloudinary or similar)
+      fileData = req.files.map((file) => ({ url: file.path })); // Replace `file.path` with the appropriate URL if using a service like Cloudinary
     }
 
     // Create the student answer
@@ -127,7 +169,7 @@ export const createStudentAnswer = async (req, res, next) => {
       question,
       questionType,
       answer: questionType !== "file-upload" ? answer : undefined,
-      file: questionType === "file-upload" ? fileData : undefined,
+      files: questionType === "file-upload" ? fileData : undefined,
       evaluationTypeId,
       evaluationType,
       lessonNote,
@@ -472,7 +514,116 @@ export const getStudentAnswersByEvaluation = async (req, res, next) => {
 };
 
 // Update an existing student answer
+
 export const updateStudentAnswer = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.id; // Authenticated user ID
+    const userRole = req.user.role; // Authenticated user role
+
+    let studentId;
+    let isAuthorized = false;
+
+    if (userRole === "admin" || userRole === "proprietor") {
+      isAuthorized = true;
+      studentId = req.body.student;
+
+      // Ensure 'student' field is provided
+      if (!studentId) {
+        throw new BadRequestError(
+          "For admin or proprietor, the 'student' field must be provided.",
+        );
+      }
+
+      // Validate that the student exists and is valid
+      const student = await Student.findById(studentId);
+      if (!student) {
+        throw new NotFoundError("Provided student not found.");
+      }
+    } else if (userRole === "student") {
+      student = userId; // Assign the current user as the student
+      // Validate that the student is assigned the subject
+      const student = await Student.findById(student).populate("subjects");
+      if (!student) {
+        throw new NotFoundError("Student not found.");
+      }
+
+      isAuthorized = true;
+
+      if (!isAuthorized) {
+        throw new BadRequestError(
+          "You are not allowed to attempt this question.",
+        );
+      }
+    }
+
+    // Find the existing student answer
+    const studentAnswer = await StudentAnswer.findById(id);
+    if (!studentAnswer) {
+      throw new NotFoundError("Student answer not found.");
+    }
+
+    // Extract fields from request
+    const { answer, isCorrect, marksAwarded, explanation, questionType } =
+      req.body;
+
+    // Handle file uploads if questionType is file-upload
+    let uploadedFiles = studentAnswer.files; // Retain existing files unless new ones are uploaded
+    if (req.files && req.files.length > 0) {
+      const allowedTypes = [
+        "application/pdf",
+        "application/msword",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      ];
+
+      uploadedFiles = req.files.map((file) => {
+        const { path: fileUrl, mimetype, size } = file;
+
+        if (!allowedTypes.includes(mimetype)) {
+          throw new BadRequestError(
+            `Invalid file type: ${mimetype}. Allowed types are PDF, Word, and Excel files.`,
+          );
+        }
+
+        if (size > 3 * 1024 * 1024) {
+          throw new BadRequestError("File size must not exceed 5MB.");
+        }
+
+        return {
+          url: fileUrl, // Replace with the actual URL
+        };
+      });
+    }
+
+    // Validate for file-upload type questions
+    if (
+      questionType === "file-upload" &&
+      (!uploadedFiles || uploadedFiles.length === 0)
+    ) {
+      throw new BadRequestError("File is required for file-upload questions.");
+    }
+
+    // Update fields dynamically
+    if (answer && questionType !== "file-upload") studentAnswer.answer = answer;
+    if (isCorrect !== undefined) studentAnswer.isCorrect = isCorrect;
+    if (marksAwarded !== undefined) studentAnswer.marksAwarded = marksAwarded;
+    if (explanation) studentAnswer.explanation = explanation;
+    if (questionType === "file-upload") studentAnswer.files = uploadedFiles;
+
+    // Save the updated student answer
+    await studentAnswer.save();
+
+    res.status(StatusCodes.OK).json({
+      message: "Student answer updated successfully",
+      studentAnswer,
+    });
+  } catch (error) {
+    next(new BadRequestError(error.message));
+  }
+};
+
+/*export const updateStudentAnswer = async (req, res, next) => {
   try {
     const { id } = req.params;
 
@@ -492,7 +643,7 @@ export const updateStudentAnswer = async (req, res, next) => {
   } catch (error) {
     next(new BadRequestError(error.message));
   }
-};
+};*/
 
 // Delete a student answer
 export const deleteStudentAnswer = async (req, res, next) => {

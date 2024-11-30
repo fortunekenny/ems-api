@@ -260,12 +260,12 @@ export const getExamDetailsWithAnswers = async (req, res, next) => {
       }),
     );
 
-    res.status(200).json({
+    res.status(StatusCodes.OK).json({
       examDetails: exam,
       questionsWithAnswers,
     });
   } catch (error) {
-    next(error);
+    next(new BadRequestError(error.message));
   }
 };
 

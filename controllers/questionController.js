@@ -108,32 +108,32 @@ export const createQuestion = async (req, res, next) => {
       ...rest,
     };
 
-    // If the questionType is "file-upload," save file details
-    if (questionType === "file-upload" && req.file) {
-      const { path: fileUrl } = req.file; // Extract file details
-
-      // Check allowed mimetypes
+    // Handle file upload for file-upload question type
+    if (questionType === "file-upload" && req.files && req.files.length > 0) {
+      // Validate the file types and sizes
       const allowedTypes = [
         "application/pdf",
         "application/msword",
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       ];
-      if (!allowedTypes.includes(req.file.mimetype)) {
-        throw new BadRequestError("Invalid file type.");
-      }
 
-      // Check that the file size is not more than 3MB (3MB = 3 * 1024 * 1024 bytes)
-      if (req.file.size > 3 * 1024 * 1024) {
-        throw new BadRequestError("File size must not exceed 3MB.");
-      }
+      const filesData = req.files.map((file) => {
+        // Validate each file's mime type and size
+        if (!allowedTypes.includes(file.mimetype)) {
+          throw new BadRequestError("Invalid file type.");
+        }
+        if (file.size > 3 * 1024 * 1024) {
+          // File size limit: 3MB
+          throw new BadRequestError("File size must not exceed 3MB.");
+        }
 
-      // Add file details to the question
-      questionData.files = [
-        {
-          url: fileUrl, // Only store the file URL
-        },
-      ];
+        // Add the file URL to the files array
+        return { url: file.path };
+      });
+
+      // Add files to the questionData
+      questionData.files = filesData;
     }
 
     // Create the question
@@ -313,7 +313,41 @@ export const updateQuestion = async (req, res, next) => {
     // Prepare update data
     const updateData = { ...rest };
 
-    // If questionType is "file-upload," handle the uploaded file
+    // Prepare the update data
+
+    // Handle file uploads for "file-upload" type
+    if (questionType === "file-upload" && req.files) {
+      const allowedTypes = [
+        "application/pdf",
+        "application/msword",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      ];
+
+      // Process and validate each file
+      const uploadedFiles = req.files.map((file) => {
+        const { path: fileUrl, mimetype, size } = file;
+
+        if (!allowedTypes.includes(mimetype)) {
+          throw new BadRequestError(
+            `Invalid file type: ${mimetype}. Allowed types are PDF, Word, and Excel files.`,
+          );
+        }
+
+        if (size > 3 * 1024 * 1024) {
+          throw new BadRequestError("File size must not exceed 5MB.");
+        }
+
+        return {
+          url: fileUrl,
+        };
+      });
+
+      // Add the files to the update data
+      updateData.files = uploadedFiles;
+    }
+
+    /*// If questionType is "file-upload," handle the uploaded file
     if (questionType === "file-upload" && req.file) {
       const { path: fileUrl, mimetype, size } = req.file; // Extract file details
 
@@ -339,7 +373,7 @@ export const updateQuestion = async (req, res, next) => {
         fileType: mimetype.split("/")[1], // Extract type (e.g., pdf, doc)
         fileSize: size,
       };
-    }
+    }*/
 
     // Update the question
     const updatedQuestion = await Question.findByIdAndUpdate(id, updateData, {
