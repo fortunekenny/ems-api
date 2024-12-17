@@ -118,6 +118,10 @@ const questionSchema = new mongoose.Schema({
     type: String,
     required: false,
   },
+  subTopic: {
+    type: String,
+    required: false,
+  },
   questionText: {
     type: String,
     required: function () {
@@ -218,7 +222,7 @@ const questionSchema = new mongoose.Schema({
     type: Number,
     required: [true, "Please provide the marks for the question"],
     min: [1, "Marks should be greater than or equal to 1"],
-    max: [10, "Marks should not exceed 10"],
+    max: [20, "Marks should not exceed 10"],
   },
   classId: {
     type: mongoose.Schema.Types.ObjectId,

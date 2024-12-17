@@ -25,11 +25,11 @@ export const createDiary = async (req, res, next) => {
     const currentDate = new Date();
 
     // Check if the current date is within the allowed window for creating diary entries
-    if (currentDate < oneWeekBeforeTermStart || currentDate >= termStartDate) {
+    /*if (currentDate < oneWeekBeforeTermStart || currentDate >= termStartDate) {
       throw new BadRequestError(
         "Diary entries can only be created within one week before the term starts.",
       );
-    }
+    }*/
 
     // Check authorization
     let isAuthorized = false;
@@ -81,19 +81,38 @@ export const createDiary = async (req, res, next) => {
 // Get all Diary entries
 export const getAllDairies = async (req, res, next) => {
   try {
-    const dairies = await Diary.find().populate("teacher classId subject");
+    const dairies = await Diary.find().populate([
+      { path: "subjectTeacher", select: "_id name" },
+      { path: "classId", select: "_id className" },
+      { path: "subject", select: "_id subjectName subjectCode" },
+    ]);
     res.status(StatusCodes.OK).json(dairies);
   } catch (error) {
     next(error);
   }
 };
 
+/*
+          .populate([
+        {
+          path: "classes",
+          select: "_id className students subjects classTeacher",
+        },
+        {
+          path: "subjects",
+          select: "_id subjectName subjectCode",
+        },
+      ])
+    */
+
 // Get a single Diary entry by ID
 export const getDiaryById = async (req, res, next) => {
   try {
-    const diary = await Diary.findById(req.params.id).populate(
-      "teacher classId subject",
-    );
+    const diary = await Diary.findById(req.params.id).populate([
+      { path: "subjectTeacher", select: "_id name" },
+      { path: "classId", select: "_id className" },
+      { path: "subject", select: "_id subjectName subjectCode" },
+    ]);
     if (!diary) throw new NotFoundError("Diary entry not found");
     res.status(StatusCodes.OK).json(diary);
   } catch (error) {
@@ -157,15 +176,15 @@ export const approveDiary = async (req, res, next) => {
       throw new NotFoundError("Diary not found.");
     }
 
-    // Check if the current status is already "approved"
-    if (diary.status === "approved") {
+    // Check if the diary is already approved
+    if (diary.approved) {
       return res.status(StatusCodes.OK).json({
         message: "This diary has already been approved.",
       });
     }
 
-    // Update the status to "approved"
-    diary.status = "approved";
+    // Update the approved status to true
+    diary.approved = true;
     diary.updatedAt = Date.now(); // Update the `updatedAt` field
 
     // Save the updated diary

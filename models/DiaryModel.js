@@ -22,7 +22,7 @@ const diarySchema = new mongoose.Schema({
     required: true,
   },
   lessonWeek: {
-    type: Number, // Week number of the term (calculated dynamically)
+    type: Number, // Week number of the term
     required: true,
   },
   topic: {
@@ -35,10 +35,9 @@ const diarySchema = new mongoose.Schema({
       required: true,
     },
   ],
-  status: {
-    type: String,
-    enum: ["approved", "unapproved"],
-    default: "unapproved",
+  approved: {
+    type: Boolean,
+    default: false,
   },
   session: {
     type: String,

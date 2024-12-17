@@ -7,7 +7,7 @@ import {
   deleteLessonNote,
   getLessonNoteBySubject,
   getLessonNoteByClass,
-  getLessonNoteByStatus,
+  getLessonNoteByApprovalStatus,
   getLessonNoteByWeek,
   approveLessonNote,
 } from "../controllers/lessonNoteController.js";
@@ -65,11 +65,11 @@ router.get(
   getLessonNoteByClass,
 ); // New route for getting by class
 router.get(
-  "/status/:status",
+  "/approved/:approved",
   authenticateToken,
   checkStatus,
   authorizeRole("admin", "proprietor", "teacher"),
-  getLessonNoteByStatus,
+  getLessonNoteByApprovalStatus,
 ); // New route for status
 router.get(
   "/week/:week",

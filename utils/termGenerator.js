@@ -236,7 +236,7 @@ export const getCurrentTermDetails = (startDate, holidayDurations) => {
   let currentStartDate = new Date(startDate); // Start date of the first term
   const now = new Date(); // Current date for comparison
   let currentTerm = "first"; // Default to first term
-  let termStartDate, termEndDate, holidayStartDate, holidayEndDate;
+  let termStartDate, termEndDate, holidayStartDate, holidayEndDate, isHoliday;
 
   // Infinite loop that cycles through terms and holidays
   while (true) {
@@ -247,6 +247,7 @@ export const getCurrentTermDetails = (startDate, holidayDurations) => {
       currentTerm = "first";
       termStartDate = currentStartDate;
       termEndDate = firstTermEndDate;
+      isHoliday = false;
       break;
     }
 
@@ -259,6 +260,7 @@ export const getCurrentTermDetails = (startDate, holidayDurations) => {
       currentTerm = "first";
       termStartDate = firstTermEndDate;
       termEndDate = holidayEndDate;
+      isHoliday = true;
       break;
     }
 
@@ -272,6 +274,7 @@ export const getCurrentTermDetails = (startDate, holidayDurations) => {
       currentTerm = "second";
       termStartDate = currentStartDate;
       termEndDate = secondTermEndDate;
+      isHoliday = false;
       break;
     }
 
@@ -284,6 +287,7 @@ export const getCurrentTermDetails = (startDate, holidayDurations) => {
       currentTerm = "second";
       termStartDate = secondTermEndDate;
       termEndDate = holidayEndDate;
+      isHoliday = true;
       break;
     }
 
@@ -297,6 +301,7 @@ export const getCurrentTermDetails = (startDate, holidayDurations) => {
       currentTerm = "third";
       termStartDate = currentStartDate;
       termEndDate = thirdTermEndDate;
+      isHoliday = false;
       break;
     }
 
@@ -309,6 +314,7 @@ export const getCurrentTermDetails = (startDate, holidayDurations) => {
       currentTerm = "third";
       termStartDate = thirdTermEndDate;
       termEndDate = holidayEndDate;
+      isHoliday = true;
       break;
     }
 
@@ -320,6 +326,7 @@ export const getCurrentTermDetails = (startDate, holidayDurations) => {
   const msInAWeek = 7 * 24 * 60 * 60 * 1000; // Milliseconds in a week
   const weeksElapsed = Math.floor((now - termStartDate) / msInAWeek);
   const weekOfTerm = weeksElapsed + 1; // Adding 1 to make it 1-indexed
+  const nextTermStartDate = holidayEndDate; // Determine next term start date
 
   return {
     term: currentTerm,
@@ -329,5 +336,7 @@ export const getCurrentTermDetails = (startDate, holidayDurations) => {
     holidayEndDate: holidayEndDate || null,
     session: getCurrentSession(),
     weekOfTerm,
+    isHoliday,
+    nextTermStartDate,
   };
 };

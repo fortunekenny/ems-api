@@ -6,13 +6,116 @@ import NotFoundError from "../errors/not-found.js";
 import { StatusCodes } from "http-status-codes";
 
 // Create ClassWork
+
 export const createClassWork = async (req, res, next) => {
   try {
-    const {
+    const { lessonNote, questions } = req.body;
+
+    if (!lessonNote || !questions) {
+      throw new BadRequestError(
+        "LessonNote and questions are required fields.",
+      );
+    }
+
+    const userId = req.user.id;
+    const userRole = req.user.role;
+
+    // Authorization logic
+    let isAuthorized = false;
+
+    if (["admin", "proprietor"].includes(userRole)) {
+      if (!req.body.subjectTeacher) {
+        throw new BadRequestError(
+          "For admin or proprietor, the 'subjectTeacher' field is required.",
+        );
+      }
+      isAuthorized = true;
+    } else if (userRole === "teacher") {
+      const teacher = await Staff.findById(userId).populate("subjects");
+      if (!teacher) {
+        throw new BadRequestError("Teacher not found.");
+      }
+
+      isAuthorized = teacher.subjects.some(
+        (subjectItem) => subjectItem.toString() === req.body.subject,
+      );
+
+      req.body.subjectTeacher = userId; // Assign the teacher as the subject teacher
+    }
+
+    if (!isAuthorized) {
+      throw new BadRequestError(
+        "You are not authorized to create this class work.",
+      );
+    }
+
+    // Fetch LessonNote and assign related fields
+    const note = await LessonNote.findById(lessonNote);
+    if (!note) {
+      throw new BadRequestError("Lesson note not found.");
+    }
+
+    req.body.classId = note.classId;
+    req.body.subject = note.subject;
+    req.body.topic = note.topic;
+    req.body.subTopic = note.subTopic;
+    req.body.session = note.session;
+    req.body.term = note.term;
+    req.body.lessonWeek = note.lessonWeek;
+
+    // Fetch students for the classId
+    const classData = await Class.findById(req.body.classId).populate(
+      "students",
+    );
+    if (!classData || !classData.students) {
+      throw new BadRequestError("Class or students not found.");
+    }
+
+    req.body.students = classData.students.map((student) => student._id);
+    req.body.submitted = []; // Initialize as an empty array
+
+    // Save ClassWork
+    const classWork = new ClassWork(req.body);
+    await classWork.save();
+
+    // Populate fields for the response
+    /*const populatedClassWork = await ClassWork.findById(classWork._id)
+      .populate({ path: "questions", select: "_id questionText" })
+      .populate({ path: "classId", select: "_id className" });*/
+
+    // Populate fields for the response
+    const populatedClassWork = await ClassWork.findById(classWork._id).populate(
+      [
+        { path: "questions", select: "_id questionType questionText options" },
+        { path: "classId", select: "_id className" },
+      ],
+    );
+
+    // Add additional fields to the response
+    const response = {
+      ...populatedClassWork.toObject(),
+      lessonWeek: req.body.lessonWeek,
+      // classId: req.body.classId,
+      subject: req.body.subject,
+      topic: req.body.topic,
+      subTopic: req.body.subTopic,
+      session: req.body.session,
+      term: req.body.term,
+    };
+
+    res.status(StatusCodes.CREATED).json(response);
+  } catch (error) {
+    next(new BadRequestError(error.message));
+  }
+};
+
+/*export const createClassWork = async (req, res, next) => {
+  try {
+    let {
       subjectTeacher,
       lessonNote,
       questions,
-      dueDate,
+      // dueDate,
       lessonWeek,
       classId,
       subject,
@@ -20,14 +123,17 @@ export const createClassWork = async (req, res, next) => {
       subTopic,
       session,
       term,
-      evaluationType,
     } = req.body;
 
     const userId = req.user.id;
     const userRole = req.user.role;
 
     // Validate required fields
-    if (!questions || !lessonNote || !dueDate) {
+    if (
+    !questions ||
+     !lessonNote 
+     //|| !dueDate
+    ) {
       throw new BadRequestError("All required fields must be provided.");
     }
 
@@ -71,13 +177,13 @@ export const createClassWork = async (req, res, next) => {
     }
 
     // Assign the classId, subject, topic, subTopic, session, term, and lessonWeek based on the lessonNote
-    classId = note.classId;
-    subject = note.subject;
-    topic = note.topic;
-    subTopic = note.subTopic;
-    session = note.session;
-    term = note.term;
-    lessonWeek = note.lessonWeek;
+    req.body.classId = note.classId;
+    req.body.subject = note.subject;
+    req.body.topic = note.topic;
+    req.body.subTopic = note.subTopic;
+    req.body.session = note.session;
+    req.body.term = note.term;
+    req.body.lessonWeek = note.lessonWeek;
 
     // Fetch students for the given classId
     const classData = await Class.findById(req.body.classId).populate(
@@ -95,25 +201,57 @@ export const createClassWork = async (req, res, next) => {
     const classWork = new ClassWork(req.body);
     await classWork.save();
 
-    res.status(StatusCodes.CREATED).json(classWork);
+    // Populate questions to include _id and questionText in the response
+    const populatedClassWork = await ClassWork.findById(classWork._id).populate(
+      {
+        path: "questions",
+        select: "_id questionText",
+      },
+      {
+        path: "classId",
+        select: "_id className",
+      },
+    );
+
+    res.status(StatusCodes.CREATED).json(populatedClassWork);
+
+    // res.status(StatusCodes.CREATED).json(classWork);
   } catch (error) {
     next(new BadRequestError(error.message));
   }
-};
+};*/
 
 // Get All ClassWorks
 export const getAllClassWorks = async (req, res, next) => {
   try {
-    const classWorks = await ClassWork.find()
-      .populate("subjectTeacher")
+    const classWorks = await ClassWork.find().populate([
+      { path: "questions", select: "_id questionType questionText options" },
+      {
+        path: "classId",
+        select: "_id className",
+      },
+      {
+        path: "subject",
+        select: "_id subjectName",
+      },
+      {
+        path: "subjectTeacher",
+        select: "_id name",
+      },
+      {
+        path: "lessonNote",
+        select: "_id lessonweek lessonPeriod",
+      },
+    ]);
+    /*.populate("subjectTeacher")
       .populate("lessonNote")
-      .populate("class")
+      .populate("classId")
       .populate("subject")
       .populate("questions")
       .populate("students")
-      .populate("submitted");
+      .populate("submitted");*/
 
-    res.status(StatusCodes.OK).json(classWorks);
+    res.status(StatusCodes.OK).json({ count: classWorks.length, classWorks });
   } catch (error) {
     next(new BadRequestError(error.message));
   }
@@ -124,14 +262,25 @@ export const getClassWorkById = async (req, res, next) => {
   try {
     const { id } = req.params;
 
-    const classWork = await ClassWork.findById(id)
-      .populate("subjectTeacher")
-      .populate("lessonNote")
-      .populate("classId")
-      .populate("subject")
-      .populate("questions")
-      .populate("students")
-      .populate("submitted");
+    const classWork = await ClassWork.findById(id).populate([
+      { path: "questions", select: "_id questionType questionText options" },
+      {
+        path: "classId",
+        select: "_id className",
+      },
+      {
+        path: "subject",
+        select: "_id subjectName",
+      },
+      {
+        path: "subjectTeacher",
+        select: "_id name",
+      },
+      {
+        path: "lessonNote",
+        select: "_id lessonweek lessonPeriod",
+      },
+    ]);
 
     if (!classWork) {
       throw new NotFoundError("ClassWork not found.");

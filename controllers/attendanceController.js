@@ -7,7 +7,7 @@ import {
   startTermGenerationDate,
   holidayDurationForEachTerm,
   getCurrentSession,
-} from "../utils/termGenerator.js"; // Assume this utility function exists
+} from "../utils/termGenerator.js";
 import Student from "../models/StudentModel.js";
 import Class from "../models/ClassModel.js";
 

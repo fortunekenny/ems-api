@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import Question from "../models/QuestionsModel.js";
 import LessonNote from "../models/LessonNoteModel.js";
 import Staff from "../models/StaffModel.js";
@@ -31,6 +32,25 @@ export const createQuestion = async (req, res, next) => {
       throw new BadRequestError("Please provide all required fields.");
     }
 
+    // Validate that lessonNote exists and retrieve related information
+    const lessonNoteExists = await LessonNote.findById(lessonNote).populate([
+      {
+        path: "subject",
+        select: "_id subjectName",
+      },
+    ]);
+    // const lessonNoteExists = await LessonNote.findById(lessonNote).populate(
+    //   "subject",
+    // );
+
+    if (!lessonNoteExists) {
+      throw new NotFoundError("LessonNote not found.");
+    }
+
+    const subject = lessonNoteExists.subject;
+
+    // const classId = lessonNoteExists.classId;
+
     // Check if the authenticated user is authorized
     let subjectTeacherId;
     let isAuthorized = false;
@@ -47,9 +67,15 @@ export const createQuestion = async (req, res, next) => {
       }
 
       // Validate that the subjectTeacher exists and is valid
-      const teacher = await Staff.findById(subjectTeacherId).populate(
-        "subjects",
-      );
+      const teacher = await Staff.findById(subjectTeacherId).populate([
+        {
+          path: "subjects",
+          select: "_id subjectName",
+        },
+      ]);
+      // const teacher = await Staff.findById(subjectTeacherId).populate(
+      //   "subjects",
+      // );
       if (!teacher) {
         throw new NotFoundError("Provided subjectTeacher not found.");
       }
@@ -65,7 +91,13 @@ export const createQuestion = async (req, res, next) => {
       }
     } else if (userRole === "teacher") {
       // Validate that the teacher is assigned the subject
-      const teacher = await Staff.findById(userId).populate("subjects");
+      // const teacher = await Staff.findById(userId).populate("subjects");
+      const teacher = await Staff.findById(userId).populate([
+        {
+          path: "subject",
+          select: "_id subjectName",
+        },
+      ]);
       if (!teacher) {
         throw new NotFoundError("Teacher not found.");
       }
@@ -83,15 +115,6 @@ export const createQuestion = async (req, res, next) => {
       subjectTeacherId = userId; // Assign the current teacher as the subjectTeacher
     }
 
-    // Validate that lessonNote exists and retrieve related information
-    const lessonNoteExists = await LessonNote.findById(lessonNote).populate(
-      "subject",
-    );
-
-    if (!lessonNoteExists) {
-      throw new NotFoundError("LessonNote not found.");
-    }
-
     // Set default question data
     const questionData = {
       lessonNote,
@@ -100,8 +123,9 @@ export const createQuestion = async (req, res, next) => {
       options,
       correctAnswer,
       marks,
-      subject: lessonNoteExists.subject,
+      subject,
       classId: lessonNoteExists.classId,
+      topic: lessonNoteExists.topic,
       lessonWeek: lessonNoteExists.lessonWeek,
       session: lessonNoteExists.session,
       term: lessonNoteExists.term,
@@ -119,6 +143,9 @@ export const createQuestion = async (req, res, next) => {
       ];
 
       const filesData = req.files.map((file) => {
+        // console.log("Uploading file:", file.originalname); // Log the file name
+        // console.log("File MIME type:", file.mimetype); // Log the MIME type
+
         // Validate each file's mime type and size
         if (!allowedTypes.includes(file.mimetype)) {
           throw new BadRequestError("Invalid file type.");
@@ -205,12 +232,73 @@ export const createQuestion = async (req, res, next) => {
   res.status(StatusCodes.CREATED).json({ question });
 };*/
 
+export const getAllQuestions = async (req, res, next) => {
+  try {
+    const questions = await Question.find().populate([
+      {
+        path: "classId",
+        select: "_id className",
+      },
+      {
+        path: "subject",
+        select: "_id subjectName",
+      },
+      {
+        path: "subjectTeacher",
+        select: "_id name",
+      },
+      {
+        path: "lessonNote",
+        select: "_id lessonweek lessonPeriod",
+      },
+    ]);
+    /*
+          .populate([
+        {
+          path: "teacher",
+          select: "_id name",
+        },
+        {
+          path: "classId",
+          select: "_id className",
+        },
+        {
+          path: "subject",
+          select: "_id subjectName subjectCode",
+        },
+      ])
+    */
+    res.status(StatusCodes.OK).json({ count: questions.length, questions });
+  } catch (error) {
+    next(new BadRequestError(error.message));
+  }
+};
+
 // Get all questions for a specific lesson note
 export const getQuestionsByLessonNote = async (req, res, next) => {
   try {
     const { lessonNoteId } = req.params;
 
-    const questions = await Question.find({ lessonNote: lessonNoteId });
+    const questions = await Question.find({
+      lessonNote: lessonNoteId,
+    }).populate([
+      {
+        path: "classId",
+        select: "_id className",
+      },
+      {
+        path: "subject",
+        select: "_id subjectName",
+      },
+      {
+        path: "subjectTeacher",
+        select: "_id name",
+      },
+      {
+        path: "lessonNote",
+        select: "_id lessonweek lessonPeriod",
+      },
+    ]);
     if (questions.length === 0) {
       throw new NotFoundError("No questions found for this lesson note.");
     }
@@ -226,7 +314,24 @@ export const getQuestionById = async (req, res, next) => {
   try {
     const { id } = req.params;
 
-    const question = await Question.findById(id);
+    const question = await Question.findById(id).populate([
+      {
+        path: "classId",
+        select: "_id className",
+      },
+      {
+        path: "subject",
+        select: "_id subjectName",
+      },
+      {
+        path: "subjectTeacher",
+        select: "_id name",
+      },
+      {
+        path: "lessonNote",
+        select: "_id lessonweek lessonPeriod",
+      },
+    ]);
     if (!question) {
       throw new NotFoundError("Question not found.");
     }
@@ -241,13 +346,33 @@ export const getQuestionById = async (req, res, next) => {
 export const updateQuestion = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { questionType, ...rest } = req.body;
+    const { questionType, subject: bodySubject, ...rest } = req.body;
 
     const userId = req.user.id; // Authenticated user ID
     const userRole = req.user.role; // Authenticated user role
 
     let subjectTeacherId;
     let isAuthorized = false;
+
+    // Fetch the question along with its subject
+    const question = await Question.findById(id);
+
+    if (!question) {
+      throw new NotFoundError("Question not found.");
+    }
+
+    // Extract the subject from the question
+    const subject = question.subject;
+
+    // console.log("subject: ", subject);
+    // console.log("subject's teacher: ", subject);
+
+    if (!subject) {
+      throw new BadRequestError(
+        "Subject is not associated with this question.",
+      );
+    }
+
     // Check if the authenticated user is authorized (must be a subject teacher for the lessonNote, admin, or proprietor)
     if (userRole === "admin" || userRole === "proprietor") {
       isAuthorized = true;
@@ -260,6 +385,10 @@ export const updateQuestion = async (req, res, next) => {
         );
       }
 
+      // if (!mongoose.Types.ObjectId.isValid(subjectTeacherId)) {
+      //   throw new BadRequestError("Invalid subjectTeacher ID format.");
+      // }
+
       // Validate that the subjectTeacher exists and is valid
       const teacher = await Staff.findById(subjectTeacherId).populate(
         "subjects",
@@ -268,8 +397,18 @@ export const updateQuestion = async (req, res, next) => {
         throw new NotFoundError("Provided subjectTeacher not found.");
       }
 
+      // const isAssignedSubject = teacher.subjects.some((subjectItem) => {
+      //   console.log(
+      //     "Comparing subjectItem: ",
+      //     subjectItem,
+      //     " with subject: ",
+      //     subject,
+      //   );
+      //   return subjectItem && subjectItem.equals(subject);
+      // });
+
       const isAssignedSubject = teacher.subjects.some(
-        (subjectItem) => subjectItem.toString() === subject.toString(),
+        (subjectItem) => subjectItem && subjectItem.equals(subject),
       );
 
       if (!isAssignedSubject) {
@@ -285,35 +424,21 @@ export const updateQuestion = async (req, res, next) => {
       }
 
       isAuthorized = teacher.subjects.some(
-        (subjectItem) => subjectItem.toString() === subject.toString(),
+        (subjectItem) =>
+          subjectItem && subjectItem.toString() === subject.toString(),
       );
 
       if (!isAuthorized) {
         throw new BadRequestError(
-          "You are not authorized to create an exam for the selected subject.",
+          "You are not authorized to update a question for the selected subject.",
         );
       }
 
       subjectTeacherId = userId; // Assign the current teacher as the subjectTeacher
     }
 
-    // Find the question and populate the lessonNote's subject to check authorization
-    const question = await Question.findById(id).populate({
-      path: "lessonNote",
-      populate: {
-        path: "subject",
-        model: "Subject",
-      },
-    });
-
-    if (!question) {
-      throw new NotFoundError("Question not found.");
-    }
-
     // Prepare update data
     const updateData = { ...rest };
-
-    // Prepare the update data
 
     // Handle file uploads for "file-upload" type
     if (questionType === "file-upload" && req.files) {
@@ -433,7 +558,7 @@ export const updateQuestion = async (req, res, next) => {
 };*/
 
 // Delete a question by ID
-export const deleteQuestion = async (req, res, next) => {
+/*export const deleteQuestion = async (req, res, next) => {
   try {
     const { id } = req.params;
 
@@ -446,6 +571,73 @@ export const deleteQuestion = async (req, res, next) => {
       .status(StatusCodes.OK)
       .json({ message: "Question deleted successfully." });
   } catch (error) {
+    next(new BadRequestError(error.message));
+  }
+};*/
+
+import { v2 as cloudinary } from "cloudinary"; // Import Cloudinary correctly
+
+// Ensure cloudinary is properly initialized
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
+
+export const deleteQuestion = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+
+    // Find the question by ID
+    const question = await Question.findById(id);
+    if (!question) {
+      throw new NotFoundError("Question not found.");
+    }
+
+    // If questionType is "file-upload", delete associated files from Cloudinary
+    if (
+      question.questionType === "file-upload" &&
+      question.files &&
+      question.files.length > 0
+    ) {
+      const deletePromises = question.files.map(async (file) => {
+        // Extract public_id from the URL
+        const parts = file.url.split("/upload/")[1].split("/"); // Split after "/upload/"
+        parts.shift(); // Remove the first part (version number if present)
+        const publicId = decodeURIComponent(parts.join("/").split(".")[0]); // Join folder/filename, exclude extension
+
+        // Determine if the file is a raw resource
+        const isRawFile = file.url.includes("/raw/");
+
+        // Log the extracted public_id and resource type for debugging
+        // console.log(
+        //   "Deleting file with public_id:",
+        //   publicId,
+        //   "resource_type:",
+        //   isRawFile ? "raw" : "image",
+        // );
+
+        // Delete from Cloudinary
+        return cloudinary.uploader.destroy(publicId, {
+          resource_type: isRawFile ? "raw" : "image",
+        });
+      });
+
+      // Wait for all files to be deleted
+      const deleteResults = await Promise.all(deletePromises);
+
+      // Log results for debugging
+      // console.log("Cloudinary delete results:", deleteResults);
+    }
+
+    // Delete the question from the database
+    await Question.findByIdAndDelete(id);
+
+    res.status(StatusCodes.OK).json({
+      message: "Question deleted successfully.",
+    });
+  } catch (error) {
+    console.error("Error deleting question or files:", error);
     next(new BadRequestError(error.message));
   }
 };

@@ -1,6 +1,7 @@
 import express from "express";
 import {
   createQuestion,
+  getAllQuestions,
   getQuestionsByLessonNote,
   getQuestionById,
   updateQuestion,
@@ -25,6 +26,14 @@ router.post(
   createQuestion,
 );
 
+router.get(
+  "/",
+  authenticateToken,
+  checkStatus,
+  authorizeRole("admin", "proprietor", "teacher"),
+  getAllQuestions,
+); // Get all getAllQuestions
+
 /*router.post(
   "/",
   authenticateToken,
@@ -33,15 +42,6 @@ router.post(
   createQuestion,
 );*/
 
-// Route to get all questions for a specific lesson note
-router.get(
-  "/lessonNote/:lessonNoteId",
-  authenticateToken,
-  checkStatus,
-  authorizeRole("admin", "teacher", "proprietor"),
-  getQuestionsByLessonNote,
-);
-
 // Route to get a specific question by ID
 router.get(
   "/:id",
@@ -49,6 +49,15 @@ router.get(
   checkStatus,
   authorizeRole("admin", "teacher", "proprietor"),
   getQuestionById,
+);
+
+// Route to get all questions for a specific lesson note
+router.get(
+  "/lessonNote/:lessonNoteId",
+  authenticateToken,
+  checkStatus,
+  authorizeRole("admin", "teacher", "proprietor"),
+  getQuestionsByLessonNote,
 );
 
 // Route to update a question by ID

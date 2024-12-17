@@ -41,6 +41,26 @@ const lessonNoteSchema = new mongoose.Schema({
     type: Date,
     required: true,
   },
+  lessonTime: {
+    type: String,
+    required: [true, "Please provide the lesson time"],
+    validate: {
+      validator: function (v) {
+        // Optional: Add custom validation for time format (e.g., "HH:MM AM/PM")
+        return /^(0[1-9]|1[0-2]):[0-5][0-9] (AM|PM)$/.test(v);
+      },
+      message: "Invalid time format. Expected format: HH:MM AM/PM",
+    },
+  },
+
+  lessonPeriod: {
+    type: Number,
+    required: true,
+  },
+  lessonDuration: {
+    type: Number,
+    default: 45,
+  },
   previousKnowledge: {
     type: String,
     required: true,
@@ -69,10 +89,9 @@ const lessonNoteSchema = new mongoose.Schema({
       required: false,
     },
   ],
-  status: {
-    type: String,
-    enum: ["approved", "unapproved"],
-    default: "unapproved",
+  approved: {
+    type: Boolean,
+    default: false,
   },
   session: {
     type: String,

@@ -1,8 +1,13 @@
 // controllers/lessonNoteController.js
 import LessonNote from "../models/LessonNoteModel.js";
-import Staff from "../models/StaffModel.js"; // Ensure Staff model is imported
+import Staff from "../models/StaffModel.js";
 import { StatusCodes } from "http-status-codes";
 import BadRequestError from "../errors/bad-request.js";
+import {
+  getCurrentTermDetails,
+  startTermGenerationDate,
+  holidayDurationForEachTerm,
+} from "../utils/termGenerator.js";
 
 // Create a new lesson note
 export const createLessonNote = async (req, res, next) => {
@@ -20,6 +25,16 @@ export const createLessonNote = async (req, res, next) => {
     } = getCurrentTermDetails(
       startTermGenerationDate,
       holidayDurationForEachTerm,
+    );
+    console.log(
+      "termStartDate: ",
+      termStartDate,
+      "isHoliday: ",
+      isHoliday,
+      "nextTermStartDate: ",
+      nextTermStartDate,
+      "currentWeekOfTerm: ",
+      currentWeekOfTerm,
     );
 
     // Holiday constraint: If in holiday, lesson notes can only be created from one week before the new term starts onward
@@ -101,22 +116,30 @@ export const createLessonNote = async (req, res, next) => {
 // Get all lesson notes
 export const getAllLessonNotes = async (req, res, next) => {
   try {
-    const lessonNotes = await LessonNote.find().populate(
-      "teacher classId subject topic subTopic",
-    );
-    /*
-          .populate([
-        {
-          path: "classes",
-          select: "_id className students subjects classTeacher",
+    const lessonNotes = await LessonNote.find().populate([
+      {
+        path: "teacher",
+        select: "_id name",
+      },
+      {
+        path: "classId",
+        select: "_id className",
+      },
+      {
+        path: "subject",
+        select: "_id subjectName subjectCode",
+      },
+      {
+        path: "evaluation",
+        select: "_id questions",
+        populate: {
+          path: "questions",
+          select: "_id questionText questionType options",
         },
-        {
-          path: "subjects",
-          select: "_id subjectName subjectCode",
-        },
-      ])
-    */
-    res.status(StatusCodes.OK).json(lessonNotes);
+      },
+    ]);
+
+    res.status(StatusCodes.OK).json({ count: lessonNotes.length, lessonNotes });
   } catch (error) {
     next(new BadRequestError(error.message));
   }
@@ -125,9 +148,20 @@ export const getAllLessonNotes = async (req, res, next) => {
 // Get a single lesson note by ID
 export const getLessonNoteById = async (req, res, next) => {
   try {
-    const lessonNote = await LessonNote.findById(req.params.id).populate(
-      "teacher classId subject topic subTopic",
-    );
+    const lessonNote = await LessonNote.findById(req.params.id).populate([
+      {
+        path: "teacher",
+        select: "_id name",
+      },
+      {
+        path: "classId",
+        select: "_id className",
+      },
+      {
+        path: "subject",
+        select: "_id subjectName subjectCode",
+      },
+    ]);
     if (!lessonNote) {
       throw new NotFoundError("Lesson note not found");
     }
@@ -145,9 +179,20 @@ export const getLessonNoteById = async (req, res, next) => {
 export const getLessonNoteBySubject = async (req, res, next) => {
   try {
     const { subjectId } = req.params;
-    const lessonNotes = await LessonNote.find({ subject: subjectId }).populate(
-      "teacher classId subject topic subTopic",
-    );
+    const lessonNotes = await LessonNote.find({ subject: subjectId }).populate([
+      {
+        path: "teacher",
+        select: "_id name",
+      },
+      {
+        path: "classId",
+        select: "_id className",
+      },
+      {
+        path: "subject",
+        select: "_id subjectName subjectCode",
+      },
+    ]);
     if (lessonNotes.length === 0) {
       throw new NotFoundError(
         "No lesson notes found for the specified subject",
@@ -167,9 +212,20 @@ export const getLessonNoteBySubject = async (req, res, next) => {
 export const getLessonNoteByClass = async (req, res, next) => {
   try {
     const { classId } = req.params;
-    const lessonNotes = await LessonNote.find({ classId }).populate(
-      "teacher classId subject topic subTopic",
-    );
+    const lessonNotes = await LessonNote.find({ classId }).populate([
+      {
+        path: "teacher",
+        select: "_id name",
+      },
+      {
+        path: "classId",
+        select: "_id className",
+      },
+      {
+        path: "subject",
+        select: "_id subjectName subjectCode",
+      },
+    ]);
     if (lessonNotes.length === 0) {
       throw new NotFoundError("No lesson notes found for the specified class");
     }
@@ -183,26 +239,44 @@ export const getLessonNoteByClass = async (req, res, next) => {
   }
 };
 
-// Get lesson notes by status (approved or unapproved)
-export const getLessonNoteByStatus = async (req, res, next) => {
+// Get lesson notes by status
+export const getLessonNoteByApprovalStatus = async (req, res, next) => {
   try {
-    const { status } = req.params;
+    const { approved } = req.params;
 
-    // Validate the status parameter to ensure it's either 'approved' or 'unapproved'
-    if (status !== "approved" && status !== "unapproved") {
+    // Validate and convert the approved parameter to a boolean
+    if (approved !== "true" && approved !== "false") {
       throw new BadRequestError(
-        "Invalid status. Use 'approved' or 'unapproved'.",
+        "Invalid approved status. Use 'true' or 'false'.",
       );
     }
+    const isApproved = approved === "true";
 
-    const lessonNotes = await LessonNote.find({ status }).populate(
-      "teacher classId subject topic subTopic",
-    );
+    // Find lesson notes based on the approved status
+    const lessonNotes = await LessonNote.find({
+      approved: isApproved,
+    }).populate([
+      {
+        path: "teacher",
+        select: "_id name",
+      },
+      {
+        path: "classId",
+        select: "_id className",
+      },
+      {
+        path: "subject",
+        select: "_id subjectName subjectCode",
+      },
+    ]);
 
+    // Handle the case when no lesson notes are found
     if (lessonNotes.length === 0) {
-      throw new NotFoundError(`No ${status} lesson notes found`);
+      const statusMessage = isApproved ? "approved" : "unapproved";
+      throw new NotFoundError(`No lesson notes are ${statusMessage}.`);
     }
 
+    // Respond with the list of lesson notes
     res.status(StatusCodes.OK).json(lessonNotes);
   } catch (error) {
     next(
@@ -217,9 +291,20 @@ export const getLessonNoteByStatus = async (req, res, next) => {
 export const getLessonNoteByWeek = async (req, res, next) => {
   try {
     const { week } = req.params;
-    const lessonNotes = await LessonNote.find({ lessonWeek: week }).populate(
-      "teacher classId subject topic subTopic",
-    );
+    const lessonNotes = await LessonNote.find({ lessonWeek: week }).populate([
+      {
+        path: "teacher",
+        select: "_id name",
+      },
+      {
+        path: "classId",
+        select: "_id className",
+      },
+      {
+        path: "subject",
+        select: "_id subjectName subjectCode",
+      },
+    ]);
     if (lessonNotes.length === 0) {
       throw new NotFoundError(`No lesson notes found for week ${week}`);
     }
@@ -304,9 +389,9 @@ export const updateLessonNote = async (req, res, next) => {
   }
 };
 
-// Update lesson note status to "approved"
-export const approveLessonNote = async (req, res) => {
-  const { lessonNoteId } = req.params; // Get lesson note ID from the URL params
+//update lessonNote approval status
+export const approveLessonNote = async (req, res, next) => {
+  const { lessonNoteId } = req.params; // Get lessonNote ID from the URL params
 
   if (!lessonNoteId) {
     return res.status(StatusCodes.BAD_REQUEST).json({
@@ -321,30 +406,28 @@ export const approveLessonNote = async (req, res) => {
       throw new NotFoundError("LessonNote not found.");
     }
 
-    // Check if the current status is already "approved"
-    if (lessonNote.status === "approved") {
+    // Check if the lessonNote is already approved
+    if (lessonNote.approved) {
       return res.status(StatusCodes.OK).json({
-        message: "This lesson note has already been approved.",
+        message: "This lessonNote has already been approved.",
       });
     }
 
-    // Update the status to "approved"
-    lessonNote.status = "approved";
+    // Update the approved status to true
+    lessonNote.approved = true;
     lessonNote.updatedAt = Date.now(); // Update the `updatedAt` field
 
-    // Save the updated lesson note
+    // Save the updated lessonNote
     await lessonNote.save();
 
-    // Return the updated lesson note
+    // Return the updated lessonNote
     res.status(StatusCodes.OK).json({
       message: "LessonNote approved successfully.",
       lessonNote,
     });
   } catch (error) {
-    console.error("Error approving lesson note:", error);
-    res
-      .status(StatusCodes.INTERNAL_SERVER_ERROR)
-      .json({ error: error.message });
+    console.error("Error approving lessonNote:", error);
+    next(new BadRequestError(error.message));
   }
 };
 

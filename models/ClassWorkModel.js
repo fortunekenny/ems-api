@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+// import Question from "../models/QuestionsModel.js";
 import {
   getCurrentTermDetails,
   startTermGenerationDate, // Ensure this is correctly defined
@@ -18,7 +19,7 @@ const classWorkSchema = new mongoose.Schema({
   },
   classId: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: "ClassId",
+    ref: "Class",
     required: false,
   },
   subject: {
@@ -38,9 +39,9 @@ const classWorkSchema = new mongoose.Schema({
     required: false,
   },
   questions: [
-    { type: mongoose.Schema.Types.ObjectId, ref: "Questions", required: true },
+    { type: mongoose.Schema.Types.ObjectId, ref: "Question", required: true },
   ],
-  dueDate: { type: Date, required: true },
+  // dueDate: { type: Date, required: true },
   students: [{ type: mongoose.Schema.Types.ObjectId, ref: "Student" }], // List of students who received the classWork
   submitted: [
     {

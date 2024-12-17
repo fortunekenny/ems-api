@@ -91,8 +91,13 @@ export const login = async (req, res) => {
       const tokenUser = createTokenUser(user); // Assuming Parent has name, email
       attachCookiesToResponse({ res, user: tokenUser });
       return res.status(StatusCodes.OK).json({
-        user,
-        role: "parent",
+        user: {
+          name: user.name,
+          email: user.email,
+          role: user.role,
+          status: user.status,
+        },
+        // role: "parent",
       });
     }
 
@@ -103,8 +108,13 @@ export const login = async (req, res) => {
       const tokenUser = createTokenUser(user); // Assuming Student has name, email
       attachCookiesToResponse({ res, user: tokenUser });
       return res.status(StatusCodes.OK).json({
-        user: { name: user.name, email: user.email },
-        role: "student",
+        user: {
+          name: user.name,
+          email: user.email,
+          role: user.role,
+          status: user.status,
+        },
+        // role: "student",
       });
     }
 
