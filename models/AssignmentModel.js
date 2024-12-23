@@ -4,7 +4,7 @@ const assignmentSchema = new mongoose.Schema({
   subjectTeacher: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "Staff", // Reference to Staff (Teacher only)
-    required: true,
+    required: false,
   },
   lessonNote: {
     type: mongoose.Schema.Types.ObjectId,
@@ -14,25 +14,23 @@ const assignmentSchema = new mongoose.Schema({
   classId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "Class",
-    required: true,
+    required: false,
   },
   subject: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "Subject",
-    required: true,
+    required: false,
   },
   lessonWeek: {
     type: Number, // Week number of the term (calculated dynamically)
   },
   topic: {
     type: String,
-    required: true,
   },
   subTopic: {
     type: String,
-    required: true,
   },
-  questions: [{ type: mongoose.Schema.Types.ObjectId, ref: "Questions" }],
+  questions: [{ type: mongoose.Schema.Types.ObjectId, ref: "Question" }],
   students: [{ type: mongoose.Schema.Types.ObjectId, ref: "Student" }], // List of students who received the assignment
   submitted: [
     {
@@ -41,14 +39,14 @@ const assignmentSchema = new mongoose.Schema({
     },
   ], // List of students who submitted
   evaluationType: { type: String, required: false, default: "Assignment" },
-  dueDate: { type: Date, required: true },
+  //dueDate: { type: Date, required: true },
   status: {
     type: String,
     enum: ["pending", "completed", "overdue"],
     default: "pending",
   },
-  session: { type: String, required: true }, // e.g., 2023/2024
-  term: { type: String, required: true }, // e.g., First, Second, Third
+  session: { type: String }, // e.g., 2023/2024
+  term: { type: String }, // e.g., First, Second, Third
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now },
 });

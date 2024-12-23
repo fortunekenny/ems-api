@@ -26,16 +26,16 @@ export const createLessonNote = async (req, res, next) => {
       startTermGenerationDate,
       holidayDurationForEachTerm,
     );
-    console.log(
-      "termStartDate: ",
-      termStartDate,
-      "isHoliday: ",
-      isHoliday,
-      "nextTermStartDate: ",
-      nextTermStartDate,
-      "currentWeekOfTerm: ",
-      currentWeekOfTerm,
-    );
+    // console.log(
+    //   "termStartDate: ",
+    //   termStartDate,
+    //   "isHoliday: ",
+    //   isHoliday,
+    //   "nextTermStartDate: ",
+    //   nextTermStartDate,
+    //   "currentWeekOfTerm: ",
+    //   currentWeekOfTerm,
+    // );
 
     // Holiday constraint: If in holiday, lesson notes can only be created from one week before the new term starts onward
     if (isHoliday) {

@@ -1,100 +1,179 @@
 import Assignment from "../models/AssignmentModel.js";
 import LessonNote from "../models/LessonNoteModel.js";
+import Staff from "../models/StaffModel.js";
 import Class from "../models/ClassModel.js";
+import Question from "../models/QuestionsModel.js";
 import BadRequestError from "../errors/bad-request.js";
 import NotFoundError from "../errors/not-found.js";
 import { StatusCodes } from "http-status-codes";
 
 // Create a new assignment
+
 export const createAssignment = async (req, res, next) => {
   try {
-    const {
-      subjectTeacher,
-      lessonNote,
-      questions,
-      dueDate,
-      lessonWeek,
-      classId,
-      subject,
-      topic,
-      subTopic,
-      session,
-      term,
-      evaluationType,
-    } = req.body;
-    const userId = req.user.id;
-    const userRole = req.user.role;
+    const { lessonNote, questions, evaluationType } = req.body;
+    const { id: userId, role: userRole } = req.user;
 
     // Validate required fields
-    if (!questions || !lessonNote || !dueDate) {
-      throw new BadRequestError("All required fields must be provided.");
+    if (!questions || !Array.isArray(questions) || questions.length === 0) {
+      throw new BadRequestError(
+        "Questions must be provided and cannot be empty.",
+      );
+    }
+    if (!lessonNote) {
+      throw new BadRequestError("Lesson note must be provided.");
     }
 
-    // Check authorization
+    // Authorization logic
     let isAuthorized = false;
+    let subjectTeacherId;
 
-    if (userRole === "admin" || userRole === "proprietor") {
+    if (["admin", "proprietor"].includes(userRole)) {
       isAuthorized = true;
+      subjectTeacherId = req.body.subjectTeacher;
 
-      // Ensure 'teacher' field is provided for admin or proprietor
       if (!req.body.subjectTeacher) {
         throw new BadRequestError(
           "For admin or proprietor, the 'subjectTeacher' field must be provided.",
         );
       }
+
+      // Validate that the subjectTeacher exists and is valid
+      const teacher = await Staff.findById(subjectTeacherId).populate(
+        "subjects",
+      );
+      if (!teacher) {
+        throw new NotFoundError("Provided subjectTeacher not found.");
+      }
+
+      const isAssignedSubject = teacher.subjects.some(
+        (subjectItem) => subjectItem.toString() === subject.toString(),
+      );
+
+      if (!isAssignedSubject) {
+        throw new BadRequestError(
+          "The specified subjectTeacher is not assigned to the selected subject.",
+        );
+      }
     } else if (userRole === "teacher") {
-      // For teachers, validate that the requested subject is assigned to them
       const teacher = await Staff.findById(userId).populate("subjects");
       if (!teacher) {
         throw new BadRequestError("Teacher not found.");
+      }
+
+      const note = await LessonNote.findById(lessonNote);
+      if (!note) {
+        throw new BadRequestError("Lesson note not found.");
       }
 
       isAuthorized = teacher.subjects.some(
         (subjectItem) => subjectItem.toString() === note.subject.toString(),
       );
 
-      // Assign the teacher field to the authenticated teacher
-      req.body.subjectTeacher = userId;
+      if (!isAuthorized) {
+        throw new BadRequestError(
+          "You are not authorized to create a test for the selected subject.",
+        );
+      }
+
+      req.body.subjectTeacher = userId; // Assign teacher ID to the assignment
     }
 
     if (!isAuthorized) {
       throw new BadRequestError(
-        "You are not authorized to create this class work.",
+        "You are not authorized to create this assignment.",
       );
     }
 
-    // Fetch LessonNote to validate session, term, lessonWeek, and other fields
-    const note = await LessonNote.findById(lessonNote);
+    // Fetch and validate the lesson note
+    const note = await LessonNote.findById(lessonNote).populate(
+      "classId subject",
+    );
     if (!note) {
       throw new BadRequestError("Lesson note not found.");
     }
 
-    // Assign the classId, subject, topic, subTopic, session, term, and lessonWeek based on the lessonNote
-    classId = note.classId;
-    subject = note.subject;
-    topic = note.topic;
-    subTopic = note.subTopic;
-    session = note.session;
-    term = note.term;
-    lessonWeek = note.lessonWeek;
+    // Assign fields based on the lesson note
+    const { classId, subject, topic, subTopic, session, term, lessonWeek } =
+      note;
+    Object.assign(req.body, {
+      classId,
+      subject,
+      topic,
+      subTopic,
+      session,
+      term,
+      lessonWeek,
+    });
 
-    // Fetch students for the given classId
-    const classData = await Class.findById(req.body.classId).populate(
-      "students",
-    );
-    if (!classData || !classData.students) {
+    // console.log("Assignment context: ", { subject, classId, term });
+
+    // Fetch questions from database to validate them
+    const questionDocs = await Question.find({ _id: { $in: questions } });
+
+    if (questionDocs.length !== questions.length) {
+      throw new BadRequestError("Some questions could not be found.");
+    }
+
+    // Validate questions against the lesson note context
+    for (const [index, question] of questionDocs.entries()) {
+      // console.log(`Validating question ${index + 1}: `, question);
+      if (
+        question.subject.toString() !== subject._id.toString() ||
+        question.classId.toString() !== classId._id.toString() ||
+        question.term.toString().toLowerCase() !== term.toString().toLowerCase()
+      ) {
+        throw new BadRequestError(
+          `Question at index ${
+            index + 1
+          } does not match the class, subject, or term.`,
+        );
+      }
+    }
+
+    // Fetch students for the class
+    const classData = await Class.findById(classId).populate("students");
+    if (!classData || !classData.students.length) {
       throw new BadRequestError("Class or students not found.");
     }
 
-    // Populate students and initialize the submitted array to empty
+    // Populate students and initialize the submitted array
     req.body.students = classData.students.map((student) => student._id);
-    req.body.submitted = []; // Initially empty array, will be updated later as students submit work
+    req.body.submitted = []; // Initially an empty array
 
+    // Add evaluationType with a default value
+    req.body.evaluationType = evaluationType || "Assignment";
+
+    // Create the assignment
     const assignment = new Assignment(req.body);
     await assignment.save();
 
-    res.status(StatusCodes.CREATED).json(assignment);
+    // Populate assignment data for response
+    const populatedAssignment = await Assignment.findById(
+      assignment._id,
+    ).populate([
+      { path: "questions", select: "_id questionType questionText options" },
+      { path: "classId", select: "_id className" },
+      { path: "subject", select: "_id subjectName" },
+      { path: "subjectTeacher", select: "_id name" },
+      // { path: "students", select: "_id firstName lastName" },
+    ]);
+
+    // Prepare the response
+    const response = {
+      ...populatedAssignment.toObject(),
+      lessonWeek,
+      // subject,
+      topic,
+      subTopic,
+      session,
+      term,
+    };
+
+    // Send the response
+    res.status(StatusCodes.CREATED).json(response);
   } catch (error) {
+    console.error("Error creating assignment:", error);
     next(new BadRequestError(error.message));
   }
 };
@@ -102,16 +181,27 @@ export const createAssignment = async (req, res, next) => {
 // Get all assignments
 export const getAssignments = async (req, res, next) => {
   try {
-    const assignments = await Assignment.find()
-      .populate("subjectTeacher", "name") // populate teacher's name
-      .populate("classId", "name") // populate class name
-      .populate("students", "name") // populate students' names
-      .populate("lessonNote")
-      .populate("subject")
-      .populate("questions")
-      .populate("submitted");
+    const assignments = await Assignment.find().populate([
+      { path: "questions", select: "_id questionType questionText options" },
+      {
+        path: "classId",
+        select: "_id className",
+      },
+      {
+        path: "subject",
+        select: "_id subjectName",
+      },
+      {
+        path: "subjectTeacher",
+        select: "_id name",
+      },
+      {
+        path: "lessonNote",
+        select: "_id lessonweek lessonPeriod",
+      },
+    ]);
 
-    res.status(StatusCodes.OK).json(assignments);
+    res.status(StatusCodes.OK).json({ count: assignments.length, assignments });
   } catch (error) {
     next(new BadRequestError(error.message));
   }
@@ -120,14 +210,32 @@ export const getAssignments = async (req, res, next) => {
 // Get assignment by ID
 export const getAssignmentById = async (req, res, next) => {
   try {
-    const assignment = await Assignment.findById(req.params.id)
-      .populate("subjectTeacher", "name")
-      .populate("classId", "name")
-      .populate("students", "name")
-      .populate("lessonNote")
-      .populate("subject")
-      .populate("questions")
-      .populate("submitted");
+    const assignment = await Assignment.findById(req.params.id).populate([
+      { path: "questions", select: "_id questionType questionText options" },
+      {
+        path: "classId",
+        select: "_id className",
+      },
+      {
+        path: "subject",
+        select: "_id subjectName",
+      },
+      {
+        path: "subjectTeacher",
+        select: "_id name",
+      },
+      {
+        path: "lessonNote",
+        select: "_id lessonweek lessonPeriod",
+      },
+    ]);
+    // .populate("subjectTeacher", "name")
+    // .populate("classId", "name")
+    // .populate("students", "name")
+    // .populate("lessonNote")
+    // .populate("subject")
+    // .populate("questions")
+    // .populate("submitted");
 
     if (!assignment) {
       throw new NotFoundError("Assignment not found.");
@@ -219,8 +327,10 @@ export const submitAssignment = async (req, res, next) => {
 };
 
 // Delete an assignment
-export const deleteAssignment = async (req, res) => {
+export const deleteAssignment = async (req, res, next) => {
   try {
+    const { id } = req.params;
+
     const assignment = await Assignment.findByIdAndDelete(id);
 
     if (!assignment) {

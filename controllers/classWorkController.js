@@ -1,6 +1,7 @@
 import ClassWork from "../models/ClassWorkModel.js";
 import LessonNote from "../models/LessonNoteModel.js";
 import Class from "../models/ClassModel.js";
+import Question from "../models/QuestionsModel.js";
 import BadRequestError from "../errors/bad-request.js";
 import NotFoundError from "../errors/not-found.js";
 import { StatusCodes } from "http-status-codes";
@@ -55,13 +56,47 @@ export const createClassWork = async (req, res, next) => {
       throw new BadRequestError("Lesson note not found.");
     }
 
-    req.body.classId = note.classId;
+    /*    req.body.classId = note.classId;
     req.body.subject = note.subject;
     req.body.topic = note.topic;
     req.body.subTopic = note.subTopic;
     req.body.session = note.session;
     req.body.term = note.term;
-    req.body.lessonWeek = note.lessonWeek;
+    req.body.lessonWeek = note.lessonWeek;*/
+
+    const { classId, subject, topic, subTopic, session, term, lessonWeek } =
+      note;
+    Object.assign(req.body, {
+      classId,
+      subject,
+      topic,
+      subTopic,
+      session,
+      term,
+      lessonWeek,
+    });
+
+    const questionDocs = await Question.find({ _id: { $in: questions } });
+
+    if (questionDocs.length !== questions.length) {
+      throw new BadRequestError("Some questions could not be found.");
+    }
+
+    // Validate questions against the lesson note context
+    for (const [index, question] of questionDocs.entries()) {
+      // console.log(`Validating question ${index + 1}: `, question);
+      if (
+        question.subject.toString() !== subject._id.toString() ||
+        question.classId.toString() !== classId._id.toString() ||
+        question.term.toString().toLowerCase() !== term.toString().toLowerCase()
+      ) {
+        throw new BadRequestError(
+          `Question at index ${
+            index + 1
+          } does not match the class, subject, or term.`,
+        );
+      }
+    }
 
     // Fetch students for the classId
     const classData = await Class.findById(req.body.classId).populate(
@@ -77,11 +112,6 @@ export const createClassWork = async (req, res, next) => {
     // Save ClassWork
     const classWork = new ClassWork(req.body);
     await classWork.save();
-
-    // Populate fields for the response
-    /*const populatedClassWork = await ClassWork.findById(classWork._id)
-      .populate({ path: "questions", select: "_id questionText" })
-      .populate({ path: "classId", select: "_id className" });*/
 
     // Populate fields for the response
     const populatedClassWork = await ClassWork.findById(classWork._id).populate(

@@ -121,7 +121,8 @@ export const generateCurrentTerm = (startDate, holidayDurations) => {
   return currentTerm;
 };
 
-export const startTermGenerationDate = "2024-09-16";
+// export const startTermGenerationDate = "2024-09-16";
+export const startTermGenerationDate = "2024-11-16";
 
 export const holidayDurationForEachTerm = [14, 10, 21];
 
@@ -340,3 +341,9 @@ export const getCurrentTermDetails = (startDate, holidayDurations) => {
     nextTermStartDate,
   };
 };
+// console.log(
+//   "Term Details:",
+//   getCurrentTermDetails(startTermGenerationDate, holidayDurationForEachTerm),
+// );
+
+// console.log("Session:", getCurrentSession());

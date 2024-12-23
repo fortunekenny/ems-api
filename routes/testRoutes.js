@@ -22,7 +22,7 @@ router.get(
   authenticateToken,
   checkStatus,
   authorizeRole("admin", "proprietor", "teacher"),
-  testController.getTests,
+  testController.getAllTests,
 );
 router.get(
   "/:id",

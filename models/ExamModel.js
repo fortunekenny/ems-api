@@ -9,22 +9,34 @@ const examSchema = new mongoose.Schema({
   subjectTeacher: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "Staff", // Reference to Staff (Teacher only)
-    required: false,
+    required: true,
   },
   classId: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: "ClassId",
-    required: false,
+    ref: "Class",
+    required: true,
   }, // Link to Class
   subject: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "Subject",
-    required: false,
+    required: true,
   },
   questions: [
-    { type: mongoose.Schema.Types.ObjectId, ref: "Questions", required: true },
+    { type: mongoose.Schema.Types.ObjectId, ref: "Question", required: true },
   ],
-  date: { type: Date, required: true },
+  date: {
+    type: String, // Store date as a string to validate custom format
+    required: [true, "Please provide the test date"],
+    validate: {
+      validator: function (v) {
+        // Regular expression to validate dd/mm/yyyy format
+        return /^(0[1-9]|[12][0-9]|3[01])\/(0[1-9]|1[0-2])\/(\d{2}|\d{4})$/.test(
+          v,
+        );
+      },
+      message: "Invalid date format. Expected format: or dd/mm/yyyy",
+    },
+  },
   week: {
     type: Number,
     required: true,
@@ -34,8 +46,15 @@ const examSchema = new mongoose.Schema({
     required: true,
   },
   startTime: {
-    type: Number,
-    required: true,
+    type: String,
+    required: [true, "Please provide the test time"],
+    validate: {
+      validator: function (v) {
+        // Updated regex to allow single-digit hours without leading zero
+        return /^(0?[1-9]|1[0-2]):[0-5][0-9] (AM|PM)$/.test(v);
+      },
+      message: "Invalid time format. Expected format: HH:MM AM/PM",
+    },
   },
   studentId: { type: mongoose.Schema.Types.ObjectId, ref: "Student" }, // Id of student who submited this exam
   students: [{ type: mongoose.Schema.Types.ObjectId, ref: "Student" }], // List of students who are doing this exam
