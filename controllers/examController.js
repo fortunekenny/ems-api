@@ -209,8 +209,7 @@ export const getExamById = async (req, res, next) => {
 export const updateExam = async (req, res, next) => {
   try {
     const { id } = req.params; // Exam ID from request params
-    const userId = req.user.id; // Authenticated user ID
-    const userRole = req.user.role; // Authenticated user role
+    const { id: userId, role: userRole } = req.user; // Authenticated user ID and role
 
     // Find the exam to be updated
     const exam = await Exam.findById(id).populate("subjectTeacher");
@@ -218,25 +217,97 @@ export const updateExam = async (req, res, next) => {
       throw new NotFoundError("Exam not found.");
     }
 
+    const { subject, questions, classId, term } = exam;
+
     // Authorization check
+    let subjectTeacherId;
     let isAuthorized = false;
 
-    if (userRole === "admin" || userRole === "proprietor") {
+    if (["admin", "proprietor"].includes(userRole)) {
       isAuthorized = true;
+      subjectTeacherId = req.body.subjectTeacher;
+
+      // Ensure 'subjectTeacher' field is provided
+      if (!subjectTeacherId) {
+        throw new BadRequestError(
+          "For admin or proprietor, the 'subjectTeacher' field must be provided.",
+        );
+      }
+
+      const teacher = await Staff.findById(subjectTeacherId).populate([
+        { path: "subjects", select: "_id subjectName" },
+      ]);
+      if (!teacher) {
+        throw new NotFoundError("Provided subjectTeacher not found.");
+      }
+
+      const isAssignedSubject = teacher.subjects.some(
+        (subjectItem) => subjectItem && subjectItem.equals(subject),
+      );
+
+      if (!isAssignedSubject) {
+        throw new BadRequestError(
+          "The specified subjectTeacher is not assigned to the selected subject.",
+        );
+      }
     } else if (userRole === "teacher") {
-      // Teachers can only update their own assigned exams
-      isAuthorized = exam.subjectTeacher._id.toString() === userId;
+      const teacher = await Staff.findById(userId).populate("subjects");
+      if (!teacher) {
+        throw new NotFoundError("Teacher not found.");
+      }
+
+      isAuthorized = teacher.subjects.some(
+        (subjectItem) => subjectItem.toString() === subject.toString(),
+      );
+
+      if (!isAuthorized) {
+        throw new BadRequestError(
+          "You are not authorized to create a test for the selected subject.",
+        );
+      }
+
+      subjectTeacherId = userId;
     }
 
     if (!isAuthorized) {
       throw new BadRequestError("You are not authorized to update this exam.");
     }
 
+    // Fetch and validate questions
+    const questionDocs = await Question.find({ _id: { $in: questions } });
+
+    if (questionDocs.length !== questions.length) {
+      throw new BadRequestError("Some questions could not be found.");
+    }
+
+    for (const [index, question] of questionDocs.entries()) {
+      // Perform validations using saved `exam` fields (e.g., `term`)
+      if (
+        question.subject.toString() !== subject.toString() ||
+        question.classId.toString() !== classId.toString() ||
+        question.term.toString().toLowerCase() !== term.toString().toLowerCase()
+      ) {
+        throw new BadRequestError(
+          `Question at index ${
+            index + 1
+          } does not match the class, subject, or term.`,
+        );
+      }
+    }
+
     // Update the exam
     const updatedExam = await Exam.findByIdAndUpdate(id, req.body, {
       new: true, // Return the updated document
       runValidators: true, // Validate the update against the schema
-    });
+    }).populate([
+      {
+        path: "questions",
+        select: "_id questionType questionText options files",
+      },
+      { path: "classId", select: "_id className" },
+      { path: "subject", select: "_id subjectName" },
+      { path: "subjectTeacher", select: "_id name" },
+    ]);
 
     res.status(StatusCodes.OK).json({
       message: "Exam updated successfully.",

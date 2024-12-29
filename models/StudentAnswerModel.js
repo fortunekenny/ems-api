@@ -5,7 +5,7 @@ import {
   holidayDurationForEachTerm, // Ensure this is correctly defined
 } from "../utils/termGenerator.js"; // Import getCurrentTermDetails
 
-const studentAnswerSchema = new mongoose.Schema({
+/*const studentAnswerSchema = new mongoose.Schema({
   student: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "Student", // Reference to the Student model
@@ -100,7 +100,7 @@ const studentAnswerSchema = new mongoose.Schema({
         message: "File size must not exceed 5MB",
       },
     },
-  },*/
+  },
   isCorrect: {
     type: Boolean,
     default: false, // Indicates if the answer is correct or not
@@ -144,7 +144,215 @@ const studentAnswerSchema = new mongoose.Schema({
     type: Date,
     default: Date.now, // Timestamp when the answer was last updated
   },
-});
+});*/
+
+/*const studentAnswerSchema = new mongoose.Schema({
+  student: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Student", // Reference to the Student model
+    required: [false, "Student ID is required."],
+  },
+  subject: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Subject", // Reference to the Subject model
+    required: [false, "Subject ID is required."],
+  },
+  evaluationType: {
+    type: String,
+    enum: ["Test", "Assignment", "ClassWork", "Exam"],
+    required: [true, "Evaluation type is required."],
+  },
+  evaluationTypeId: {
+    type: mongoose.Schema.Types.ObjectId,
+    required: [true, "Evaluation ID is required."],
+  },
+  lessonNote: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "LessonNote", // Reference to the LessonNote model
+    required: [false, "Please provide a lesson note"],
+  },
+  questions: [
+    {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Question", // Reference to the Question model
+      required: [false, "Question ID is required."],
+    },
+  ],
+  answers: [
+    {
+      type: String,
+      required: function () {
+        return this.questionType !== "file-upload";
+      },
+      validate: {
+        validator: function (value) {
+          if (
+            this.questionType !== "file-upload" ||
+            this.questionType !== "essay" ||
+            this.questionType !== "short-answer"
+          ) {
+            return value && value.length > 0;
+          }
+          return true; // Skip validation for file-upload type
+        },
+        message: "Answer cannot be empty.",
+      },
+    },
+  ],
+
+  files: [
+    {
+      url: {
+        type: String, // URL for the file stored in Cloudinary
+        required: function () {
+          return this.questionType === "file-upload";
+        },
+      },
+    },
+  ],
+
+  isCorrect: [
+    {
+      type: Boolean,
+      default: false, // Indicates if the answer is correct or not
+    },
+  ],
+  marksAwarded: [
+    {
+      type: Number,
+      default: 0, // Marks awarded for the answer
+      min: [0, "Marks cannot be negative."],
+      max: [100, "Marks cannot exceed 100."],
+      validate: {
+        validator: Number.isInteger,
+        message: "Marks awarded must be an integer.",
+      },
+    },
+  ],
+  classId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Class", // Reference to the Class model
+  },
+  session: {
+    type: String,
+  },
+  term: {
+    type: String,
+  },
+  lessonWeek: {
+    type: Number, // Week number of the term (calculated dynamically)
+  },
+  createdAt: {
+    type: Date,
+    // default: Date.now, // Timestamp when the answer was submitted
+  },
+  updatedAt: {
+    type: Date,
+    default: Date.now, // Timestamp when the answer was last updated
+  },
+});*/
+
+const studentAnswerSchema = new mongoose.Schema(
+  {
+    student: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Student", // Reference to the Student model
+      required: [false, "Student ID is required."],
+    },
+    subject: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Subject", // Reference to the Subject model
+      required: [false, "Subject ID is required."],
+    },
+    evaluationType: {
+      type: String,
+      // enum: ["Test", "Assignment", "ClassWork", "Exam"],
+      // required: [true, "Evaluation type is required."],
+    },
+    evaluationTypeId: {
+      type: mongoose.Schema.Types.ObjectId,
+      required: [true, "Evaluation ID is required."],
+    },
+    lessonNote: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "LessonNote", // Reference to the LessonNote model
+      required: [false, "Please provide a lesson note"],
+    },
+    // questions: [
+    //   {
+    //     type: mongoose.Schema.Types.ObjectId,
+    //     ref: "Question", // Reference to the Question model
+    //     required: [false, "Question ID is required."],
+    //   },
+    // ],
+    answers: [
+      {
+        questionId: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "Question",
+          required: [true, "Question ID is required."],
+        },
+        answer: {
+          type: String,
+          required: function () {
+            return this.questionType !== "file-upload";
+          },
+          validate: {
+            validator: function (value) {
+              if (
+                this.questionType !== "file-upload" ||
+                this.questionType !== "essay" ||
+                this.questionType !== "short-answer"
+              ) {
+                return value && value.length > 0;
+              }
+              return true; // Skip validation for file-upload type
+            },
+            message: "Answer cannot be empty.",
+          },
+        },
+        files: [
+          {
+            url: {
+              type: String, // URL for the file stored in Cloudinary
+              required: function () {
+                return this.questionType === "file-upload";
+              },
+            },
+          },
+        ],
+        isCorrect: {
+          type: Boolean,
+          default: false, // Indicates if the answer is correct or not
+        },
+        marksAwarded: {
+          type: Number,
+          default: 0, // Marks awarded for the answer
+          min: [0, "Marks cannot be negative."],
+          max: [100, "Marks cannot exceed 100."],
+          validate: {
+            validator: Number.isInteger,
+            message: "Marks awarded must be an integer.",
+          },
+        },
+      },
+    ],
+    classId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Class", // Reference to the Class model
+    },
+    session: {
+      type: String,
+    },
+    term: {
+      type: String,
+    },
+    lessonWeek: {
+      type: Number, // Week number of the term (calculated dynamically)
+    },
+  },
+  { timestamps: true },
+);
 
 // Pre-validation hook to check and set session, term, and week of term before validation
 studentAnswerSchema.pre("validate", function (next) {
@@ -152,8 +360,8 @@ studentAnswerSchema.pre("validate", function (next) {
     const startDate = startTermGenerationDate; // Use createdAt or default start date if no answer date is provided
 
     // If session, term, and classId are not provided, fetch the current term details
-    if (!this.session || !this.term || !this.classId) {
-      const { session, term, weekOfTerm } = getCurrentTermDetails(
+    if (!this.session || !this.term) {
+      const { session, term } = getCurrentTermDetails(
         startDate,
         holidayDurationForEachTerm,
       );
@@ -161,7 +369,7 @@ studentAnswerSchema.pre("validate", function (next) {
       // Set session, term, and weekOfTerm if not provided
       if (!this.session) this.session = session;
       if (!this.term) this.term = term;
-      if (!this.lessonWeek) this.lessonWeek = weekOfTerm; // Set the current week of the term
+      // if (!this.lessonWeek) this.lessonWeek = weekOfTerm; // Set the current week of the term
     }
   }
 
@@ -320,4 +528,8 @@ const studentSpecificAnswer = await StudentAnswer.findOne({ student: studentId, 
 
 /*
 
+*/
+
+/*
+in the StudentAnswer.questions get each questions question.questionType, question.correctanswer if questionType is multiple-choice, true/false, or rank-order check it 
 */

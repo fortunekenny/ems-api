@@ -52,7 +52,7 @@ const classWorkSchema = new mongoose.Schema({
   evaluationType: { type: String, required: false, default: "ClassWork" },
   status: {
     type: String,
-    enum: ["pending", "completed", "overdue"],
+    enum: ["pending", "submitted"],
     default: "pending",
   },
   session: { type: String }, // e.g., 2023/2024

@@ -191,33 +191,7 @@ const questionSchema = new mongoose.Schema({
       },
     },
   ],
-  /*file: {
-    url: {
-      type: String, // URL for the file stored in Cloudinary
-      required: function () {
-        return this.questionType === "file-upload";
-      },
-    },
-    fileType: {
-      type: String,
-      enum: ["pdf", "doc", "docx", "xlsx"], // Allowed file types
-      required: function () {
-        return this.questionType === "file-upload";
-      },
-    },
-    fileSize: {
-      type: Number, // File size in bytes
-      required: function () {
-        return this.questionType === "file-upload";
-      },
-      validate: {
-        validator: function (v) {
-          return v <= 5 * 1024 * 1024; // Limit file size to 5MB
-        },
-        message: "File size must not exceed 5MB",
-      },
-    },
-  },*/
+
   marks: {
     type: Number,
     required: [true, "Please provide the marks for the question"],
@@ -228,6 +202,11 @@ const questionSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: "Class",
     required: [false, "Please provide a class ID"],
+  },
+  status: {
+    type: String,
+    enum: ["pending", "submitted"],
+    default: "pending",
   },
   session: {
     type: String,

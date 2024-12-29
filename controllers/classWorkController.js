@@ -11,59 +11,27 @@ import { StatusCodes } from "http-status-codes";
 export const createClassWork = async (req, res, next) => {
   try {
     const { lessonNote, questions } = req.body;
+    const { id: userId, role: userRole } = req.user;
 
-    if (!lessonNote || !questions) {
+    // Validate required fields
+    if (!questions || !Array.isArray(questions) || questions.length === 0) {
       throw new BadRequestError(
-        "LessonNote and questions are required fields.",
+        "Questions must be provided and cannot be empty.",
       );
     }
-
-    const userId = req.user.id;
-    const userRole = req.user.role;
-
-    // Authorization logic
-    let isAuthorized = false;
-
-    if (["admin", "proprietor"].includes(userRole)) {
-      if (!req.body.subjectTeacher) {
-        throw new BadRequestError(
-          "For admin or proprietor, the 'subjectTeacher' field is required.",
-        );
-      }
-      isAuthorized = true;
-    } else if (userRole === "teacher") {
-      const teacher = await Staff.findById(userId).populate("subjects");
-      if (!teacher) {
-        throw new BadRequestError("Teacher not found.");
-      }
-
-      isAuthorized = teacher.subjects.some(
-        (subjectItem) => subjectItem.toString() === req.body.subject,
-      );
-
-      req.body.subjectTeacher = userId; // Assign the teacher as the subject teacher
+    if (!lessonNote) {
+      throw new BadRequestError("Lesson note must be provided.");
     }
 
-    if (!isAuthorized) {
-      throw new BadRequestError(
-        "You are not authorized to create this class work.",
-      );
-    }
-
-    // Fetch LessonNote and assign related fields
-    const note = await LessonNote.findById(lessonNote);
+    // Fetch and validate the lesson note
+    const note = await LessonNote.findById(lessonNote).populate(
+      "classId subject",
+    );
     if (!note) {
       throw new BadRequestError("Lesson note not found.");
     }
 
-    /*    req.body.classId = note.classId;
-    req.body.subject = note.subject;
-    req.body.topic = note.topic;
-    req.body.subTopic = note.subTopic;
-    req.body.session = note.session;
-    req.body.term = note.term;
-    req.body.lessonWeek = note.lessonWeek;*/
-
+    // Assign fields based on the lesson note
     const { classId, subject, topic, subTopic, session, term, lessonWeek } =
       note;
     Object.assign(req.body, {
@@ -75,6 +43,62 @@ export const createClassWork = async (req, res, next) => {
       term,
       lessonWeek,
     });
+
+    // Authorization logic
+    let isAuthorized = false;
+    let subjectTeacherId;
+
+    if (["admin", "proprietor"].includes(userRole)) {
+      isAuthorized = true;
+      subjectTeacherId = req.body.subjectTeacher;
+
+      if (!req.body.subjectTeacher) {
+        throw new BadRequestError(
+          "For admin or proprietor, the 'subjectTeacher' field must be provided.",
+        );
+      }
+
+      // Validate that the subjectTeacher exists and is valid
+      const teacher = await Staff.findById(subjectTeacherId).populate(
+        "subjects",
+      );
+      if (!teacher) {
+        throw new NotFoundError("Provided subjectTeacher not found.");
+      }
+
+      const isAssignedSubject = teacher.subjects.some(
+        (subjectItem) => subjectItem.toString() === subject.toString(),
+      );
+
+      if (!isAssignedSubject) {
+        throw new BadRequestError(
+          "The specified subjectTeacher is not assigned to the selected subject.",
+        );
+      }
+    } else if (userRole === "teacher") {
+      const teacher = await Staff.findById(userId).populate("subjects");
+      if (!teacher) {
+        throw new BadRequestError("Teacher not found.");
+      }
+
+      isAuthorized = teacher.subjects.some(
+        (subjectItem) => subjectItem.toString() === subject.toString(),
+      );
+
+      if (!isAuthorized) {
+        throw new BadRequestError(
+          "You are not authorized to create class work for the selected subject.",
+        );
+      }
+      req.body.subjectTeacher = userId;
+      subjectTeacherId = userId;
+    }
+
+    if (!isAuthorized) {
+      throw new BadRequestError(
+        "You are not authorized to create this class work.",
+      );
+    }
 
     const questionDocs = await Question.find({ _id: { $in: questions } });
 
@@ -102,7 +126,7 @@ export const createClassWork = async (req, res, next) => {
     const classData = await Class.findById(req.body.classId).populate(
       "students",
     );
-    if (!classData || !classData.students) {
+    if (!classData || !classData.students.length) {
       throw new BadRequestError("Class or students not found.");
     }
 
@@ -116,140 +140,28 @@ export const createClassWork = async (req, res, next) => {
     // Populate fields for the response
     const populatedClassWork = await ClassWork.findById(classWork._id).populate(
       [
-        { path: "questions", select: "_id questionType questionText options" },
+        {
+          path: "questions",
+          select: "_id questionType questionText options files",
+        },
         { path: "classId", select: "_id className" },
+        { path: "subject", select: "_id subjectName" },
+        { path: "subjectTeacher", select: "_id name" },
+        {
+          path: "lessonNote",
+          select: "_id lessonweek lessonPeriod",
+        },
       ],
     );
 
-    // Add additional fields to the response
-    const response = {
-      ...populatedClassWork.toObject(),
-      lessonWeek: req.body.lessonWeek,
-      // classId: req.body.classId,
-      subject: req.body.subject,
-      topic: req.body.topic,
-      subTopic: req.body.subTopic,
-      session: req.body.session,
-      term: req.body.term,
-    };
-
-    res.status(StatusCodes.CREATED).json(response);
+    res.status(StatusCodes.CREATED).json({
+      message: "ClassWork created successfully",
+      populatedClassWork,
+    });
   } catch (error) {
     next(new BadRequestError(error.message));
   }
 };
-
-/*export const createClassWork = async (req, res, next) => {
-  try {
-    let {
-      subjectTeacher,
-      lessonNote,
-      questions,
-      // dueDate,
-      lessonWeek,
-      classId,
-      subject,
-      topic,
-      subTopic,
-      session,
-      term,
-    } = req.body;
-
-    const userId = req.user.id;
-    const userRole = req.user.role;
-
-    // Validate required fields
-    if (
-    !questions ||
-     !lessonNote 
-     //|| !dueDate
-    ) {
-      throw new BadRequestError("All required fields must be provided.");
-    }
-
-    // Check authorization
-    let isAuthorized = false;
-
-    if (userRole === "admin" || userRole === "proprietor") {
-      isAuthorized = true;
-
-      // Ensure 'teacher' field is provided for admin or proprietor
-      if (!req.body.subjectTeacher) {
-        throw new BadRequestError(
-          "For admin or proprietor, the 'subjectTeacher' field must be provided.",
-        );
-      }
-    } else if (userRole === "teacher") {
-      // For teachers, validate that the requested subject is assigned to them
-      const teacher = await Staff.findById(userId).populate("subjects");
-      if (!teacher) {
-        throw new BadRequestError("Teacher not found.");
-      }
-
-      isAuthorized = teacher.subjects.some(
-        (subjectItem) => subjectItem.toString() === note.subject.toString(),
-      );
-
-      // Assign the teacher field to the authenticated teacher
-      req.body.subjectTeacher = userId;
-    }
-
-    if (!isAuthorized) {
-      throw new BadRequestError(
-        "You are not authorized to create this class work.",
-      );
-    }
-
-    // Fetch LessonNote to validate session, term, lessonWeek, and other fields
-    const note = await LessonNote.findById(lessonNote);
-    if (!note) {
-      throw new BadRequestError("Lesson note not found.");
-    }
-
-    // Assign the classId, subject, topic, subTopic, session, term, and lessonWeek based on the lessonNote
-    req.body.classId = note.classId;
-    req.body.subject = note.subject;
-    req.body.topic = note.topic;
-    req.body.subTopic = note.subTopic;
-    req.body.session = note.session;
-    req.body.term = note.term;
-    req.body.lessonWeek = note.lessonWeek;
-
-    // Fetch students for the given classId
-    const classData = await Class.findById(req.body.classId).populate(
-      "students",
-    );
-    if (!classData || !classData.students) {
-      throw new BadRequestError("Class or students not found.");
-    }
-
-    // Populate students and initialize the submitted array to empty
-    req.body.students = classData.students.map((student) => student._id);
-    req.body.submitted = []; // Initially empty array, will be updated later as students submit work
-
-    // Create new ClassWork
-    const classWork = new ClassWork(req.body);
-    await classWork.save();
-
-    // Populate questions to include _id and questionText in the response
-    const populatedClassWork = await ClassWork.findById(classWork._id).populate(
-      {
-        path: "questions",
-        select: "_id questionText",
-      },
-      {
-        path: "classId",
-        select: "_id className",
-      },
-    );
-
-    res.status(StatusCodes.CREATED).json(populatedClassWork);
-
-    // res.status(StatusCodes.CREATED).json(classWork);
-  } catch (error) {
-    next(new BadRequestError(error.message));
-  }
-};*/
 
 // Get All ClassWorks
 export const getAllClassWorks = async (req, res, next) => {
@@ -273,13 +185,6 @@ export const getAllClassWorks = async (req, res, next) => {
         select: "_id lessonweek lessonPeriod",
       },
     ]);
-    /*.populate("subjectTeacher")
-      .populate("lessonNote")
-      .populate("classId")
-      .populate("subject")
-      .populate("questions")
-      .populate("students")
-      .populate("submitted");*/
 
     res.status(StatusCodes.OK).json({ count: classWorks.length, classWorks });
   } catch (error) {
@@ -326,22 +231,7 @@ export const getClassWorkById = async (req, res, next) => {
 export const updateClassWork = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const userId = req.user.id;
-    const userRole = req.user.role;
-
-    // Check authorization
-    const isAuthorized =
-      userRole === "admin" ||
-      userRole === "proprietor" ||
-      (userRole === "teacher" &&
-        classWork.lessonNote.subject &&
-        classWork.lessonNote.subject.subjectTeachers.includes(userId));
-
-    if (!isAuthorized) {
-      throw new BadRequestError(
-        "You are not authorized to update this class work.",
-      );
-    }
+    const { id: userId, role: userRole } = req.user; // Authenticated user ID and role
 
     // Fetch the existing ClassWork
     const classWork = await ClassWork.findById(id).populate("lessonNote");
@@ -349,11 +239,103 @@ export const updateClassWork = async (req, res, next) => {
       throw new NotFoundError("ClassWork not found.");
     }
 
+    const { subject, questions, classId, term } = classWork; // Use data from the existing classWork document
+
+    let subjectTeacherId;
+    let isAuthorized = false;
+
+    if (["admin", "proprietor"].includes(userRole)) {
+      isAuthorized = true;
+      subjectTeacherId = req.body.subjectTeacher;
+
+      // Ensure 'subjectTeacher' field is provided
+      if (!subjectTeacherId) {
+        throw new BadRequestError(
+          "For admin or proprietor, the 'subjectTeacher' field must be provided.",
+        );
+      }
+
+      const teacher = await Staff.findById(subjectTeacherId).populate([
+        { path: "subjects", select: "_id subjectName" },
+      ]);
+      if (!teacher) {
+        throw new NotFoundError("Provided subjectTeacher not found.");
+      }
+
+      const isAssignedSubject = teacher.subjects.some(
+        (subjectItem) => subjectItem && subjectItem.equals(subject),
+      );
+
+      if (!isAssignedSubject) {
+        throw new BadRequestError(
+          "The specified subjectTeacher is not assigned to the selected subject.",
+        );
+      }
+    } else if (userRole === "teacher") {
+      const teacher = await Staff.findById(userId).populate("subjects");
+      if (!teacher) {
+        throw new NotFoundError("Teacher not found.");
+      }
+
+      // Check if the teacher is authorized for this test's subject
+      isAuthorized = teacher.subjects.some(
+        (subjectItem) => subjectItem.toString() === subject.toString(),
+      );
+
+      if (!isAuthorized) {
+        throw new BadRequestError(
+          "You are not authorized to update this classWork for the selected subject.",
+        );
+      }
+
+      subjectTeacherId = userId;
+    }
+
+    if (!isAuthorized) {
+      throw new BadRequestError(
+        "You are not authorized to update this class work.",
+      );
+    }
+
+    // Fetch and validate questions
+    const questionDocs = await Question.find({ _id: { $in: questions } });
+
+    if (questionDocs.length !== questions.length) {
+      throw new BadRequestError("Some questions could not be found.");
+    }
+
+    for (const [index, question] of questionDocs.entries()) {
+      // Perform validations using saved `exam` fields (e.g., `term`)
+      if (
+        question.subject.toString() !== subject.toString() ||
+        question.classId.toString() !== classId.toString() ||
+        question.term.toString().toLowerCase() !== term.toString().toLowerCase()
+      ) {
+        throw new BadRequestError(
+          `Question at index ${
+            index + 1
+          } does not match the class, subject, or term.`,
+        );
+      }
+    }
+
     // Update the ClassWork
     const updatedClassWork = await ClassWork.findByIdAndUpdate(id, req.body, {
       new: true,
       runValidators: true,
-    });
+    }).populate([
+      {
+        path: "questions",
+        select: "_id questionType questionText options files",
+      },
+      { path: "classId", select: "_id className" },
+      { path: "subject", select: "_id subjectName" },
+      { path: "subjectTeacher", select: "_id name" },
+      {
+        path: "lessonNote",
+        select: "_id lessonweek lessonPeriod",
+      },
+    ]);
 
     res
       .status(StatusCodes.OK)
@@ -407,13 +389,30 @@ export const submitClassWork = async (req, res, next) => {
 // Delete ClassWork
 export const deleteClassWork = async (req, res, next) => {
   try {
-    const { id } = req.params;
+    const { id } = req.params; // ClassWork ID to be deleted
 
-    const classWork = await ClassWork.findByIdAndDelete(id);
-
+    // Find the ClassWork document
+    const classWork = await ClassWork.findById(id);
     if (!classWork) {
       throw new NotFoundError("ClassWork not found.");
     }
+
+    const { lessonNote } = classWork; // Extract the lessonNote reference
+
+    // Find the associated LessonNote document
+    const lessonNoteDoc = await LessonNote.findById(lessonNote);
+    if (!lessonNoteDoc) {
+      throw new NotFoundError("Associated lessonNote not found.");
+    }
+
+    // Remove the classWork reference from the LessonNote
+    lessonNoteDoc.classWork = lessonNoteDoc.classWork.filter(
+      (assignId) => !assignId.equals(id), // Filter out the current classWork ID
+    );
+    await lessonNoteDoc.save();
+
+    // Delete the ClassWork document
+    await ClassWork.findByIdAndDelete(id);
 
     res
       .status(StatusCodes.OK)
@@ -422,14 +421,3 @@ export const deleteClassWork = async (req, res, next) => {
     next(new BadRequestError(error.message));
   }
 };
-
-/*
-Updating submitted: When a student submits their work, you would update the submitted array in the ClassWork document.
-For example:
-
-javascript
-Copy code
-classWork.submitted.push(studentId); // Add studentId to the submitted array
-await classWork.save();
-Retrieving ClassWork with populated fields: When fetching the ClassWork document, you can populate the students and submitted fields using .populate('students') and .populate('submitted') to get the full student details if needed.
-*/

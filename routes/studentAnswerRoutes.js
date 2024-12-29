@@ -1,10 +1,12 @@
 import express from "express";
 import {
   createStudentAnswer,
+  getAllStudentsAnswer,
   getAnswersForStudentAndSubject,
   updateStudentAnswer,
   deleteStudentAnswer,
   getStudentAnswersByEvaluation,
+  downloadStudentAnswers,
 } from "../controllers/studentAnswerController.js";
 import {
   authenticateToken,
@@ -32,6 +34,13 @@ router.post(
   createStudentAnswer,
 );
 router.get(
+  "/",
+  authenticateToken,
+  checkStatus,
+  authorizeRole("admin", "proprietor", "teacher"),
+  getAllStudentsAnswer,
+);
+router.get(
   "/:studentId/:subjectId",
   authenticateToken,
   checkStatus,
@@ -56,9 +65,17 @@ router.patch(
   "/:id",
   authenticateToken,
   checkStatus,
-  authorizeRole("admin", "proprietor"),
+  authorizeRole("admin", "proprietor", "student"),
   upload.array("files", 5), // Middleware to handle file uploads
   updateStudentAnswer,
+);
+
+router.get(
+  "/answers/:id/download",
+  authenticateToken,
+  checkStatus,
+  authorizeRole("admin", "proprietor", "student", "teacher"),
+  downloadStudentAnswers,
 );
 
 router.delete(

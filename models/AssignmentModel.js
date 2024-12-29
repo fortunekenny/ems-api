@@ -40,11 +40,11 @@ const assignmentSchema = new mongoose.Schema({
   ], // List of students who submitted
   evaluationType: { type: String, required: false, default: "Assignment" },
   //dueDate: { type: Date, required: true },
-  status: {
-    type: String,
-    enum: ["pending", "completed", "overdue"],
-    default: "pending",
-  },
+  // status: {
+  //   type: String,
+  //   enum: ["pending", "submitted"],
+  //   default: "pending",
+  // },
   session: { type: String }, // e.g., 2023/2024
   term: { type: String }, // e.g., First, Second, Third
   createdAt: { type: Date, default: Date.now },

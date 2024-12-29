@@ -11,7 +11,7 @@ import { StatusCodes } from "http-status-codes";
 
 export const createAssignment = async (req, res, next) => {
   try {
-    const { lessonNote, questions, evaluationType } = req.body;
+    const { lessonNote, questions } = req.body;
     const { id: userId, role: userRole } = req.user;
 
     // Validate required fields
@@ -23,6 +23,27 @@ export const createAssignment = async (req, res, next) => {
     if (!lessonNote) {
       throw new BadRequestError("Lesson note must be provided.");
     }
+
+    // Fetch and validate the lesson note
+    const note = await LessonNote.findById(lessonNote).populate(
+      "classId subject",
+    );
+    if (!note) {
+      throw new BadRequestError("Lesson note not found.");
+    }
+
+    // Assign fields based on the lesson note
+    const { classId, subject, topic, subTopic, session, term, lessonWeek } =
+      note;
+    Object.assign(req.body, {
+      classId,
+      subject,
+      topic,
+      subTopic,
+      session,
+      term,
+      lessonWeek,
+    });
 
     // Authorization logic
     let isAuthorized = false;
@@ -61,22 +82,17 @@ export const createAssignment = async (req, res, next) => {
         throw new BadRequestError("Teacher not found.");
       }
 
-      const note = await LessonNote.findById(lessonNote);
-      if (!note) {
-        throw new BadRequestError("Lesson note not found.");
-      }
-
       isAuthorized = teacher.subjects.some(
-        (subjectItem) => subjectItem.toString() === note.subject.toString(),
+        (subjectItem) => subjectItem.toString() === subject.toString(),
       );
 
       if (!isAuthorized) {
         throw new BadRequestError(
-          "You are not authorized to create a test for the selected subject.",
+          "You are not authorized to create assignment for the selected subject.",
         );
       }
-
-      req.body.subjectTeacher = userId; // Assign teacher ID to the assignment
+      req.body.subjectTeacher = userId;
+      subjectTeacherId = userId;
     }
 
     if (!isAuthorized) {
@@ -84,29 +100,6 @@ export const createAssignment = async (req, res, next) => {
         "You are not authorized to create this assignment.",
       );
     }
-
-    // Fetch and validate the lesson note
-    const note = await LessonNote.findById(lessonNote).populate(
-      "classId subject",
-    );
-    if (!note) {
-      throw new BadRequestError("Lesson note not found.");
-    }
-
-    // Assign fields based on the lesson note
-    const { classId, subject, topic, subTopic, session, term, lessonWeek } =
-      note;
-    Object.assign(req.body, {
-      classId,
-      subject,
-      topic,
-      subTopic,
-      session,
-      term,
-      lessonWeek,
-    });
-
-    // console.log("Assignment context: ", { subject, classId, term });
 
     // Fetch questions from database to validate them
     const questionDocs = await Question.find({ _id: { $in: questions } });
@@ -141,9 +134,6 @@ export const createAssignment = async (req, res, next) => {
     req.body.students = classData.students.map((student) => student._id);
     req.body.submitted = []; // Initially an empty array
 
-    // Add evaluationType with a default value
-    req.body.evaluationType = evaluationType || "Assignment";
-
     // Create the assignment
     const assignment = new Assignment(req.body);
     await assignment.save();
@@ -152,26 +142,24 @@ export const createAssignment = async (req, res, next) => {
     const populatedAssignment = await Assignment.findById(
       assignment._id,
     ).populate([
-      { path: "questions", select: "_id questionType questionText options" },
+      {
+        path: "questions",
+        select: "_id questionType questionText options files",
+      },
       { path: "classId", select: "_id className" },
       { path: "subject", select: "_id subjectName" },
       { path: "subjectTeacher", select: "_id name" },
+      {
+        path: "lessonNote",
+        select: "_id lessonweek lessonPeriod",
+      },
       // { path: "students", select: "_id firstName lastName" },
     ]);
 
-    // Prepare the response
-    const response = {
-      ...populatedAssignment.toObject(),
-      lessonWeek,
-      // subject,
-      topic,
-      subTopic,
-      session,
-      term,
-    };
-
-    // Send the response
-    res.status(StatusCodes.CREATED).json(response);
+    res.status(StatusCodes.CREATED).json({
+      message: "Assignment created successfully",
+      populatedAssignment,
+    });
   } catch (error) {
     console.error("Error creating assignment:", error);
     next(new BadRequestError(error.message));
@@ -182,7 +170,10 @@ export const createAssignment = async (req, res, next) => {
 export const getAssignments = async (req, res, next) => {
   try {
     const assignments = await Assignment.find().populate([
-      { path: "questions", select: "_id questionType questionText options" },
+      {
+        path: "questions",
+        select: "_id questionType questionText options files",
+      },
       {
         path: "classId",
         select: "_id className",
@@ -229,13 +220,6 @@ export const getAssignmentById = async (req, res, next) => {
         select: "_id lessonweek lessonPeriod",
       },
     ]);
-    // .populate("subjectTeacher", "name")
-    // .populate("classId", "name")
-    // .populate("students", "name")
-    // .populate("lessonNote")
-    // .populate("subject")
-    // .populate("questions")
-    // .populate("submitted");
 
     if (!assignment) {
       throw new NotFoundError("Assignment not found.");
@@ -251,21 +235,64 @@ export const getAssignmentById = async (req, res, next) => {
 export const updateAssignment = async (req, res) => {
   try {
     const { id } = req.params;
-    const userId = req.user.id;
-    const userRole = req.user.role;
+    const { id: userId, role: userRole } = req.user; // Authenticated user ID and role
 
     const assignment = await Assignment.findById(id).populate("lessonNote");
     if (!assignment) {
       throw new NotFoundError("Assignment not found");
     }
 
-    // Check authorization
-    const isAuthorized =
-      userRole === "admin" ||
-      userRole === "proprietor" ||
-      (userRole === "teacher" &&
-        assignment.lessonNote.subject &&
-        assignment.lessonNote.subject.subjectTeachers.includes(userId));
+    const { subject, questions, classId, term } = assignment; // Use data from the existing assignment document
+
+    let subjectTeacherId;
+    let isAuthorized = false;
+
+    if (["admin", "proprietor"].includes(userRole)) {
+      isAuthorized = true;
+      subjectTeacherId = req.body.subjectTeacher;
+
+      // Ensure 'subjectTeacher' field is provided
+      if (!subjectTeacherId) {
+        throw new BadRequestError(
+          "For admin or proprietor, the 'subjectTeacher' field must be provided.",
+        );
+      }
+
+      const teacher = await Staff.findById(subjectTeacherId).populate([
+        { path: "subjects", select: "_id subjectName" },
+      ]);
+      if (!teacher) {
+        throw new NotFoundError("Provided subjectTeacher not found.");
+      }
+
+      const isAssignedSubject = teacher.subjects.some(
+        (subjectItem) => subjectItem && subjectItem.equals(subject),
+      );
+
+      if (!isAssignedSubject) {
+        throw new BadRequestError(
+          "The specified subjectTeacher is not assigned to the selected subject.",
+        );
+      }
+    } else if (userRole === "teacher") {
+      const teacher = await Staff.findById(userId).populate("subjects");
+      if (!teacher) {
+        throw new NotFoundError("Teacher not found.");
+      }
+
+      // Check if the teacher is authorized for this test's subject
+      isAuthorized = teacher.subjects.some(
+        (subjectItem) => subjectItem.toString() === subject.toString(),
+      );
+
+      if (!isAuthorized) {
+        throw new BadRequestError(
+          "You are not authorized to update this assignment for the selected subject.",
+        );
+      }
+
+      subjectTeacherId = userId;
+    }
 
     if (!isAuthorized) {
       throw new BadRequestError(
@@ -273,12 +300,49 @@ export const updateAssignment = async (req, res) => {
       );
     }
 
+    // Fetch and validate questions
+    const questionDocs = await Question.find({ _id: { $in: questions } });
+
+    if (questionDocs.length !== questions.length) {
+      throw new BadRequestError("Some questions could not be found.");
+    }
+
+    for (const [index, question] of questionDocs.entries()) {
+      // Perform validations using saved `exam` fields (e.g., `term`)
+      if (
+        question.subject.toString() !== subject.toString() ||
+        question.classId.toString() !== classId.toString() ||
+        question.term.toString().toLowerCase() !== term.toString().toLowerCase()
+      ) {
+        throw new BadRequestError(
+          `Question at index ${
+            index + 1
+          } does not match the class, subject, or term.`,
+        );
+      }
+    }
+
     const updatedAssignment = await Assignment.findByIdAndUpdate(id, req.body, {
       new: true,
       runValidators: true,
-    });
+    }).populate([
+      {
+        path: "questions",
+        select: "_id questionType questionText options files",
+      },
+      { path: "classId", select: "_id className" },
+      { path: "subject", select: "_id subjectName" },
+      { path: "subjectTeacher", select: "_id name" },
+      {
+        path: "lessonNote",
+        select: "_id lessonweek lessonPeriod",
+      },
+    ]);
 
-    res.status(StatusCodes.OK).json(updatedAssignment);
+    res.status(StatusCodes.OK).json({
+      message: "Assignment updated successfully.",
+      updatedAssignment,
+    });
   } catch (error) {
     next(new BadRequestError(error.message));
   }
@@ -329,17 +393,34 @@ export const submitAssignment = async (req, res, next) => {
 // Delete an assignment
 export const deleteAssignment = async (req, res, next) => {
   try {
-    const { id } = req.params;
+    const { id } = req.params; // Assignment ID to be deleted
 
-    const assignment = await Assignment.findByIdAndDelete(id);
-
+    // Find the Assignment document
+    const assignment = await Assignment.findById(id);
     if (!assignment) {
       throw new NotFoundError("Assignment not found.");
     }
 
+    const { lessonNote } = assignment; // Extract the lessonNote reference
+
+    // Find the associated LessonNote document
+    const lessonNoteDoc = await LessonNote.findById(lessonNote);
+    if (!lessonNoteDoc) {
+      throw new NotFoundError("Associated lessonNote not found.");
+    }
+
+    // Remove the assignment reference from the LessonNote
+    lessonNoteDoc.assignment = lessonNoteDoc.assignment.filter(
+      (assignId) => !assignId.equals(id), // Filter out the current assignment ID
+    );
+    await lessonNoteDoc.save();
+
+    // Delete the Assignment document
+    await Assignment.findByIdAndDelete(id);
+
     res
       .status(StatusCodes.OK)
-      .json({ message: "Assignment deleted successfully" });
+      .json({ message: "Assignment deleted successfully." });
   } catch (error) {
     next(new BadRequestError(error.message));
   }
