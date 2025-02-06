@@ -19,6 +19,7 @@ export const createExam = async (req, res, next) => {
       students,
       submitted,
       date,
+      marksObtainable,
       startTime,
       durationTime,
       term,
@@ -37,6 +38,8 @@ export const createExam = async (req, res, next) => {
       !date ||
       !startTime ||
       !durationTime
+      //||
+      //!marksObtainable
     ) {
       throw new BadRequestError("All required fields must be provided.");
     }
@@ -112,6 +115,7 @@ export const createExam = async (req, res, next) => {
       questions,
       students,
       submitted,
+      marksObtainable,
       date,
       startTime,
       durationTime,
@@ -167,7 +171,44 @@ export const createExam = async (req, res, next) => {
 // Get all exams
 export const getExams = async (req, res, next) => {
   try {
-    const exams = await Exam.find().populate([
+    const {
+      subjectTeacher,
+      subject,
+      evaluationType,
+      classId,
+      term,
+      session,
+      week,
+    } = req.query;
+
+    // Build a query object based on provided filters
+    const queryObject = {};
+
+    //queryObject["student.name"] = { $regex: name, $options: "i" }; // Case-insensitive search
+
+    if (subjectTeacher) {
+      queryObject["subjectTeacher"] = { $regex: subjectTeacher, $options: "i" }; // Case-insensitive search
+    }
+    if (subject) {
+      queryObject["subject"] = subject;
+    }
+    if (evaluationType) {
+      queryObject["evaluationType"] = evaluationType;
+    }
+    if (classId) {
+      queryObject["classId"] = classId;
+    }
+    if (week) {
+      queryObject["week"] = week;
+    }
+    if (term) {
+      queryObject["term"] = term;
+    }
+    if (session) {
+      queryObject["session"] = session;
+    }
+
+    const exams = await Exam.find(queryObject).populate([
       {
         path: "questions",
         select: "_id questionType questionText options files",
@@ -176,7 +217,7 @@ export const getExams = async (req, res, next) => {
       { path: "subject", select: "_id subjectName" },
       { path: "subjectTeacher", select: "_id name" },
     ]);
-    res.status(StatusCodes.OK).json(exams);
+    res.status(StatusCodes.OK).json({ count: exams.length, exams });
   } catch (error) {
     next(new BadRequestError(error.message));
   }

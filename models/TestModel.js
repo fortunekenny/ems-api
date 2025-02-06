@@ -64,6 +64,12 @@ const testSchema = new mongoose.Schema({
       message: "Invalid time format. Expected format: HH:MM AM/PM",
     },
   },
+  marksObtainable: {
+    type: Number,
+    required: false,
+    min: [1, "Marks should be greater than or equal to 1"],
+    max: [40, "Marks should not exceed 40"],
+  },
 
   // studentId: { type: mongoose.Schema.Types.ObjectId, ref: "Student" }, // Id of student who submited this test ADJUST IN STUDENTASWER CONTROLLER
 
@@ -151,6 +157,7 @@ testSchema.pre("validate", function (next) {
 const Test = mongoose.model("Test", testSchema);
 
 export default Test;
+
 /*testSchema.pre("validate", function (next) {
   if (this.isNew) {
     const startDate = startTermGenerationDate;
@@ -167,34 +174,3 @@ export default Test;
   }
   next();
 });*/
-
-// console.log(
-//   "getCurrentTermDetails context: ",
-//   // startDate,
-//   startTermGenerationDate,
-//   holidayDurationForEachTerm,
-//   // weekOfTerm,
-//   week,
-//   term,
-//   session,
-// );
-
-/*
-lessonNoteSchema.pre("validate", function (next) {
-  if (this.isNew) {
-    const startDate = startTermGenerationDate; // Use the startTermGenerationDate if no lesson date is provided
-
-    // If session or term is not provided, generate them
-    if (!this.session || !this.term || !this.lessonWeek) {
-      const { session, term, weekOfTerm } = getCurrentTermDetails(
-        startDate,
-        holidayDurationForEachTerm,
-      ); // Pass the start date and holiday durations
-      if (!this.session) this.session = session; // Set session if not provided
-      if (!this.term) this.term = term; // Set term if not provided
-      if (!this.lessonWeek) this.lessonWeek = weekOfTerm + 1; // Set lessonWeek if not provided
-    }
-  }
-  next();
-});
-*/

@@ -31,6 +31,7 @@ const assignmentSchema = new mongoose.Schema({
     type: String,
   },
   questions: [{ type: mongoose.Schema.Types.ObjectId, ref: "Question" }],
+  marksObtainable: { type: Number, required: false },
   students: [{ type: mongoose.Schema.Types.ObjectId, ref: "Student" }], // List of students who received the assignment
   submitted: [
     {

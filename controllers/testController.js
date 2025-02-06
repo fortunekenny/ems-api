@@ -20,7 +20,9 @@ export const createTest = async (req, res, next) => {
       students,
       submitted,
       startTime,
+      subjectTeacher,
       durationTime,
+      marksObtainable,
       session,
       term,
     } = req.body;
@@ -38,7 +40,8 @@ export const createTest = async (req, res, next) => {
       questions.length === 0 ||
       !date ||
       !startTime ||
-      !durationTime
+      !durationTime //||
+      // !marksObtainable
     ) {
       throw new BadRequestError("All required fields must be provided.");
     }
@@ -109,7 +112,27 @@ export const createTest = async (req, res, next) => {
     students = classData.students.map((student) => student._id);
     submitted = [];
 
-    // console.log("Creating a new Test document...");
+    // Fetch existing tests for the same subject, term, and class
+    const existingTests = await Test.find({
+      classId,
+      subject,
+      term,
+    });
+
+    // Calculate total marks for existing tests
+    const totalMarks = existingTests.reduce(
+      (sum, test) => sum + test.marksObtainable,
+      0,
+    );
+
+    // Validate total marks do not exceed 40
+    if (totalMarks + marksObtainable > 40) {
+      throw new BadRequestError(
+        `The total marks for all tests in this subject and term cannot exceed 40. Current total: ${totalMarks}, adding this test would make it ${
+          totalMarks + marksObtainable
+        }.`,
+      );
+    }
 
     const test = new Test({
       subjectTeacher: subjectTeacherId,
@@ -118,6 +141,7 @@ export const createTest = async (req, res, next) => {
       questions,
       students,
       submitted,
+      marksObtainable,
       date,
       startTime,
       durationTime,
@@ -125,11 +149,7 @@ export const createTest = async (req, res, next) => {
       term,
     });
 
-    // console.log("Saving the Test document...");
-
     await test.save();
-
-    // console.log("Test document saved successfully.");
 
     // Fetch and validate questions
     const questionDocs = await Question.find({ _id: { $in: questions } });
@@ -230,38 +250,31 @@ export const updateTest = async (req, res, next) => {
       throw new NotFoundError("Test not found.");
     }
 
-    const { subject, questions, classId, term } = test; // Use subject from the existing test document
+    const { subject, questions, subjectTeacher, classId, term } = test; // Use subject from the existing test document
 
     let subjectTeacherId;
     let isAuthorized = false;
 
     if (["admin", "proprietor"].includes(userRole)) {
       isAuthorized = true;
-      subjectTeacherId = req.body.subjectTeacher;
+      // subjectTeacherId = req.body.subjectTeacher;
 
-      // Ensure 'subjectTeacher' field is provided
-      if (!subjectTeacherId) {
-        throw new BadRequestError(
-          "For admin or proprietor, the 'subjectTeacher' field must be provided.",
-        );
-      }
+      // const teacher = await Staff.findById(subjectTeacherId).populate([
+      //   { path: "subjects", select: "_id subjectName" },
+      // ]);
+      // if (!teacher) {
+      //   throw new NotFoundError("Provided subjectTeacher not found.");
+      // }
 
-      const teacher = await Staff.findById(subjectTeacherId).populate([
-        { path: "subjects", select: "_id subjectName" },
-      ]);
-      if (!teacher) {
-        throw new NotFoundError("Provided subjectTeacher not found.");
-      }
+      // const isAssignedSubject = teacher.subjects.some(
+      //   (subjectItem) => subjectItem && subjectItem.equals(subject),
+      // );
 
-      const isAssignedSubject = teacher.subjects.some(
-        (subjectItem) => subjectItem && subjectItem.equals(subject),
-      );
-
-      if (!isAssignedSubject) {
-        throw new BadRequestError(
-          "The specified subjectTeacher is not assigned to the selected subject.",
-        );
-      }
+      // if (!isAssignedSubject) {
+      //   throw new BadRequestError(
+      //     "The specified subjectTeacher is not assigned to the selected subject.",
+      //   );
+      // }
     } else if (userRole === "teacher") {
       const teacher = await Staff.findById(userId).populate("subjects");
       if (!teacher) {
@@ -269,13 +282,14 @@ export const updateTest = async (req, res, next) => {
       }
 
       // Check if the teacher is authorized for this test's subject
+
       isAuthorized = teacher.subjects.some(
         (subjectItem) => subjectItem.toString() === subject.toString(),
       );
 
       if (!isAuthorized) {
         throw new BadRequestError(
-          "You are not authorized to update this test for the selected subject.",
+          "You are not authorized to update this test for this subject.",
         );
       }
 
@@ -327,6 +341,7 @@ export const updateTest = async (req, res, next) => {
       updatedTest,
     });
   } catch (error) {
+    console.error("Error creating test:", error);
     next(new BadRequestError(error.message));
   }
 };

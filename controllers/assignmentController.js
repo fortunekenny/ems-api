@@ -11,7 +11,7 @@ import { StatusCodes } from "http-status-codes";
 
 export const createAssignment = async (req, res, next) => {
   try {
-    const { lessonNote, questions } = req.body;
+    const { lessonNote, questions, marksObtainable } = req.body;
     const { id: userId, role: userRole } = req.user;
 
     // Validate required fields
@@ -23,6 +23,9 @@ export const createAssignment = async (req, res, next) => {
     if (!lessonNote) {
       throw new BadRequestError("Lesson note must be provided.");
     }
+    // if (!marksObtainable) {
+    //   throw new BadRequestError("marksObtainable must be provided.");
+    // }
 
     // Fetch and validate the lesson note
     const note = await LessonNote.findById(lessonNote).populate(
@@ -169,7 +172,48 @@ export const createAssignment = async (req, res, next) => {
 // Get all assignments
 export const getAssignments = async (req, res, next) => {
   try {
-    const assignments = await Assignment.find().populate([
+    const {
+      subjectTeacher,
+      subject,
+      evaluationType,
+      classId,
+      term,
+      session,
+      lessonWeek,
+      topic,
+    } = req.query;
+
+    // Build a query object based on provided filters
+    const queryObject = {};
+
+    //queryObject["student.name"] = { $regex: name, $options: "i" }; // Case-insensitive search
+
+    if (subjectTeacher) {
+      queryObject["subjectTeacher"] = { $regex: subjectTeacher, $options: "i" }; // Case-insensitive search
+    }
+    if (subject) {
+      queryObject["subject"] = subject;
+    }
+    if (evaluationType) {
+      queryObject["evaluationType"] = evaluationType;
+    }
+    if (classId) {
+      queryObject["classId"] = classId;
+    }
+    if (lessonWeek) {
+      queryObject["lessonWeek"] = lessonWeek;
+    }
+    if (topic) {
+      queryObject["topic"] = topic;
+    }
+    if (term) {
+      queryObject["term"] = term;
+    }
+    if (session) {
+      queryObject["session"] = session;
+    }
+
+    const assignments = await Assignment.find(queryObject).populate([
       {
         path: "questions",
         select: "_id questionType questionText options files",
@@ -242,7 +286,7 @@ export const updateAssignment = async (req, res) => {
       throw new NotFoundError("Assignment not found");
     }
 
-    const { subject, questions, classId, term } = assignment; // Use data from the existing assignment document
+    const { subject, questions, classId, term, marksObtainable } = assignment; // Use data from the existing assignment document
 
     let subjectTeacherId;
     let isAuthorized = false;

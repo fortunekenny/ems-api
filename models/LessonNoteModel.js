@@ -5,6 +5,11 @@ import {
   holidayDurationForEachTerm, // Ensure this is correctly defined
 } from "../utils/termGenerator.js"; // Import getCurrentTermDetails
 
+const { session, term, weekOfTerm } = getCurrentTermDetails(
+  startTermGenerationDate,
+  holidayDurationForEachTerm,
+); // Pass the start date and holiday durations
+
 const lessonNoteSchema = new mongoose.Schema({
   teacher: {
     type: mongoose.Schema.Types.ObjectId,
@@ -23,6 +28,7 @@ const lessonNoteSchema = new mongoose.Schema({
   },
   lessonWeek: {
     type: Number, // Week number of the term (calculated dynamically)
+    default: weekOfTerm + 1,
   },
   topic: {
     type: String,
@@ -75,29 +81,28 @@ const lessonNoteSchema = new mongoose.Schema({
     type: String,
     required: true,
   },
-  evaluation: [
-    {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Classwork",
-      required: false,
-    },
-  ],
-  assignment: [
-    {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Assignment",
-      required: false,
-    },
-  ],
+  evaluation: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Classwork",
+    required: false,
+  },
+  assignment: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Assignment",
+    required: false,
+  },
+
   approved: {
     type: Boolean,
     default: false,
   },
   session: {
     type: String,
+    default: session,
   },
   term: {
     type: String,
+    default: term,
   },
   createdAt: {
     type: Date,
@@ -110,7 +115,7 @@ const lessonNoteSchema = new mongoose.Schema({
 });
 
 // Pre-validation hook to auto-generate session, term, and lesson week if they are not provided
-lessonNoteSchema.pre("validate", function (next) {
+/*lessonNoteSchema.pre("validate", function (next) {
   if (this.isNew) {
     const startDate = startTermGenerationDate; // Use the startTermGenerationDate if no lesson date is provided
 
@@ -126,7 +131,7 @@ lessonNoteSchema.pre("validate", function (next) {
     }
   }
   next();
-});
+});*/
 
 // Create LessonNote model
 const LessonNote = mongoose.model("LessonNote", lessonNoteSchema);

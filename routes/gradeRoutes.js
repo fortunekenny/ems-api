@@ -3,20 +3,17 @@ import {
   authenticateToken,
   authorizeRole,
 } from "../middleware/authentication.js";
+import { checkStatus } from "../utils/checkStatus.js";
 import * as gradeController from "../controllers/gradeController.js";
 
 const router = express.Router();
-
-// Role-based constants
-const ADMIN = "admin";
-const STAFF = "staff";
-const STUDENT = "student";
 
 // Create a grade
 router.post(
   "/",
   authenticateToken,
-  authorizeRole(ADMIN, STAFF),
+  checkStatus,
+  authorizeRole("admin", "proprietor", "teacher"),
   gradeController.createGrade,
 );
 
@@ -24,7 +21,8 @@ router.post(
 router.get(
   "/",
   authenticateToken,
-  authorizeRole(ADMIN, STAFF),
+  checkStatus,
+  authorizeRole("admin", "proprietor", "teacher"),
   gradeController.getGrades,
 );
 
@@ -32,7 +30,7 @@ router.get(
 router.get(
   "/student/:studentId",
   authenticateToken,
-  authorizeRole(ADMIN, STAFF, STUDENT),
+  authorizeRole("admin", "proprietor", "teacher"),
   gradeController.getGradesForStudent,
 );
 
@@ -40,7 +38,7 @@ router.get(
 router.get(
   "/:id",
   authenticateToken,
-  authorizeRole(ADMIN, STAFF, STUDENT),
+  authorizeRole("admin", "proprietor", "teacher"),
   gradeController.getGradeById,
 );
 
@@ -48,7 +46,7 @@ router.get(
 router.patch(
   "/:id",
   authenticateToken,
-  authorizeRole(ADMIN, STAFF),
+  authorizeRole("admin", "proprietor", "teacher"),
   gradeController.updateGrade,
 );
 
@@ -56,7 +54,7 @@ router.patch(
 router.delete(
   "/:id",
   authenticateToken,
-  authorizeRole(ADMIN),
+  authorizeRole("admin", "proprietor"),
   gradeController.deleteGrade,
 );
 

@@ -8,78 +8,87 @@ import Parent from "../models/ParentModel.js";
 import Student from "../models/StudentModel.js";
 import Staff from "../models/StaffModel.js";
 
-/*
-export const register = async (req, res) => {
-  // console.log("Register endpoint hit");
-  const { email, name, password, role } = req.body;
-
-  // Check if email and password are provided
-  if (!email || !password || !name || !role) {
-    throw new BadRequestError("Please provide email, password, and name");
-  }
-
-  const emailAlreadyExists = await User.findOne({ email });
-  if (emailAlreadyExists) {
-    throw new BadRequestError("Email already exist");
-  }
-
-  //first registered user is
-  // const isFirstAccount = (await User.countDocuments({})) === 0;
-  // const role = isFirstAccount ? "founder" : "user";
-
-  const user = await User.create({ email, name, password, role });
-  const tokenUser = createTokenUser(user);
-  attachCookiesToResponse({ res, user: tokenUser });
-  res.status(StatusCodes.CREATED).json({ user: tokenUser });
-};*/
-
-/*
 export const login = async (req, res) => {
-  const { email, password } = req.body;
+  const { email, password, studentID, staffId } = req.body;
 
-  // Check if email and password are provided
-  if (!email || !password) {
-    throw new BadRequestError("Please provide email and password");
+  // Check if required fields are provided
+  if (!password || (!email && !studentID && !staffId)) {
+    throw new BadRequestError(
+      "Please provide email or studentID or staffId, along with password.",
+    );
   }
 
   try {
-    const user = await User.findOne({ email });
+    let user;
 
-    // Check if user exists
-    if (!user) {
-      throw new UnauthenticatedError("Invalid Credentials");
+    // Check if Parent is logging in (only email allowed)
+    if (email) {
+      user = await Parent.findOne({ email });
+      if (user && (await bcrypt.compare(password, user.password))) {
+        const tokenUser = createTokenUser(user); // Assuming Parent has name, email
+        attachCookiesToResponse({ res, user: tokenUser });
+        return res.status(StatusCodes.OK).json({
+          user: {
+            firstName: user.firstName,
+            email: user.email,
+            role: user.role,
+            status: user.status,
+          },
+        });
+      }
     }
 
-    // Check if the user has been approved by an admin
-    if (!user.isApproved) {
-      return res
-        .status(StatusCodes.FORBIDDEN)
-        .json({ error: "Your account has not been approved by an admin." });
+    // Check if Student is logging in (email or studentID allowed)
+    if (email || studentID) {
+      const studentQuery = email ? { email } : { studentID };
+      user = await Student.findOne(studentQuery);
+      if (user && (await bcrypt.compare(password, user.password))) {
+        const tokenUser = createTokenUser(user); // Assuming Student has name, email
+        attachCookiesToResponse({ res, user: tokenUser });
+        return res.status(StatusCodes.OK).json({
+          user: {
+            firstName: user.firstName,
+            studentID: user.studentID,
+            role: user.role,
+            status: user.status,
+          },
+        });
+      }
     }
 
-    // Verify the password
-    const isPasswordCorrect = await user.comparePassword(password);
-    if (!isPasswordCorrect) {
-      throw new UnauthenticatedError("Invalid Credentials");
+    // Check if Staff is logging in (email or staffId allowed)
+    if (email || staffId) {
+      const staffQuery = email ? { email } : { staffId };
+      user = await Staff.findOne(staffQuery);
+      if (user && (await bcrypt.compare(password, user.password))) {
+        const tokenUser = createTokenUser(user); // Assuming Staff has name, email, role
+        attachCookiesToResponse({ res, user: tokenUser });
+        return res.status(StatusCodes.OK).json({
+          user: {
+            firstName: user.firstName,
+            staffId: user.staffId,
+            email: user.email,
+            role: user.role,
+            status: user.status,
+          },
+        });
+      }
     }
 
-    // Generate a token for the user
-    const tokenUser = createTokenUser(user);
-    attachCookiesToResponse({ res, user: tokenUser });
-
-    res.status(StatusCodes.OK).json({ user: tokenUser });
+    // If the user is not found in any collection, return an error
+    throw new UnauthenticatedError("Invalid credentials");
   } catch (error) {
-    // Handle errors, returning appropriate status and message
-    res.status(StatusCodes.UNAUTHORIZED).json({ error: error.message });
+    res
+      .status(StatusCodes.INTERNAL_SERVER_ERROR)
+      .json({ error: error.message });
   }
 };
-*/
 
-export const login = async (req, res) => {
-  const { email, password } = req.body;
+/* export const login = async (req, res) => {
+  const { email, password, studentID, staffId } = req.body;
 
   // Check if email and password are provided
-  if (!email || !password) {
+  if (!email || !password || !studentID || !staffId) {
     throw new BadRequestError("Please provide email and password");
   }
 
@@ -141,15 +150,7 @@ export const login = async (req, res) => {
       .status(StatusCodes.INTERNAL_SERVER_ERROR)
       .json({ error: error.message });
   }
-};
-
-// const logout = async (req, res) => {
-//   res.cookie("token", "logout", {
-//     httpOnly: true,
-//     expires: new Date(Date.now()),
-//   });
-//   res.status(StatusCodes.OK).json({ msg: `user logged out` });
-// };
+}; */
 
 export const logout = (req, res) => {
   // Clear the JWT token from the cookie
@@ -162,9 +163,3 @@ export const logout = (req, res) => {
   // res.json({ message: "User logged out successfully" });
   res.status(StatusCodes.OK).json({ msg: `User logged out successfully` });
 };
-
-// export default {
-//   register,
-//   login,
-//   logoutUser,
-// };

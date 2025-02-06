@@ -10,7 +10,45 @@ import Attendance from "../models/AttendanceModel.js";
 // Get all students
 export const getStudents = async (req, res) => {
   try {
-    const students = await Student.find().select("-password");
+    const { firstName, middleName, lastName, classId, term, session } =
+      req.query;
+
+    // Build a query object based on provided filters
+    const queryObject = {};
+
+    if (firstName) {
+      queryObject["firstName"] = { $regex: firstName, $options: "i" }; // Case-insensitive search
+    }
+    if (middleName) {
+      queryObject["middleName"] = { $regex: middleName, $options: "i" }; // Case-insensitive search
+    }
+    if (lastName) {
+      queryObject["lastName"] = { $regex: lastName, $options: "i" }; // Case-insensitive search
+    }
+    if (classId) {
+      queryObject["classId"] = classId;
+    }
+    if (term) {
+      queryObject["term"] = term;
+    }
+    if (session) {
+      queryObject["session"] = session;
+    }
+
+    const students = await Student.find(queryObject)
+      .select("-password")
+      .populate([
+        {
+          path: "classId",
+          select: "_id className classTeacher subjectTeachers subjects",
+          populate: [
+            { path: "classTeacher", select: "_id name" },
+            { path: "subjectTeachers", select: "_id name" },
+            { path: "subjects", select: "_id subjectName" },
+          ],
+        },
+        { path: "guardian", select: "_id name" },
+      ]);
     res.status(StatusCodes.OK).json({ count: students.length, students });
   } catch (error) {
     res
@@ -30,8 +68,13 @@ export const getStudentById = async (req, res) => {
         {
           path: "classId",
           select: "_id className classTeacher subjectTeachers subjects",
+          populate: [
+            { path: "classTeacher", select: "_id name" },
+            { path: "subjectTeachers", select: "_id name" },
+            { path: "subjects", select: "_id subjectName" },
+          ],
         },
-        { path: "guardian", select: "_id name email" },
+        { path: "guardian", select: "_id name" },
       ]);
 
     if (!student) {
@@ -196,14 +239,16 @@ export const deleteStudent = async (req, res) => {
     const { id: studentId } = req.params;
     const student = await Student.findOne({ _id: studentId });
 
+    console.log("role", req.user.role);
+
     if (!student) {
       throw new NotFoundError(`No student found with id: ${studentId}`);
     }
 
     // Ensure only admins can delete a student
-    if (req.user.role !== "admin") {
-      throw new UnauthorizedError("Only admins can delete student records.");
-    }
+    // if (req.user.role !== "admin") {
+    //   throw new UnauthorizedError("Only admins can delete student records.");
+    // }
 
     // Step 1: Remove the student from all related classes
     await Class.updateMany(

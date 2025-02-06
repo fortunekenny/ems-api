@@ -25,9 +25,88 @@ const attendanceSchema = new mongoose.Schema({
     type: Date,
     required: true,
   },
+  morningStatus: {
+    type: String,
+    enum: ["present", "absent", "publicHoliday", "pending"],
+    default: "pending",
+    required: true,
+  },
+  afternoonStatus: {
+    type: String,
+    enum: ["present", "absent", "publicHoliday", "pending"],
+    default: "pending",
+    required: true,
+  },
+  session: {
+    type: String,
+  },
+  term: {
+    type: String,
+  },
+  timeMarkedMorning: {
+    type: Date,
+    default: null, // Timestamp for marking morning attendance
+  },
+  timeMarkedAfternoon: {
+    type: Date,
+    default: null, // Timestamp for marking afternoon attendance
+  },
+  totalDaysPresent: {
+    type: Number,
+    default: 0,
+  },
+  totalDaysAbsent: {
+    type: Number,
+    default: 0,
+  },
+  totalDaysPublicHoliday: {
+    type: Number,
+    default: 0,
+  },
+  totalDaysSchoolOpened: {
+    type: Number,
+    default: 0,
+  }, // Total number of days in the term
+  createdAt: {
+    type: Date,
+    default: Date.now,
+  },
+  updatedAt: {
+    type: Date,
+    default: Date.now,
+  },
+});
+
+attendanceSchema.pre("save", function (next) {
+  this.updatedAt = Date.now();
+  next();
+});
+
+// module.exports = mongoose.model("Attendance", attendanceSchema);
+
+/* const attendanceSchema = new mongoose.Schema({
+  student: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Student",
+    required: true,
+  },
+  classId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Class",
+    required: false,
+  },
+  classTeacher: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Staff",
+    required: false,
+  },
+  date: {
+    type: Date,
+    required: true,
+  },
   status: {
     type: String,
-    enum: ["present", "absent", "holiday", "Pending"],
+    enum: ["present", "absent", "publicHoliday", "Pending"],
     default: "Pending",
     required: true,
   },
@@ -39,7 +118,7 @@ const attendanceSchema = new mongoose.Schema({
   },
   timeMarked: {
     type: Date,
-    default: null,
+    default: Date.now,
   },
   createdAt: {
     type: Date,
@@ -49,7 +128,7 @@ const attendanceSchema = new mongoose.Schema({
     type: Date,
     default: Date.now,
   },
-});
+}); */
 
 // Pre-validation hook to auto-generate session and term if they are not provided
 attendanceSchema.pre("validate", function (next) {

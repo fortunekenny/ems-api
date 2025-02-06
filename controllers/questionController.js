@@ -27,7 +27,8 @@ export const createQuestion = async (req, res, next) => {
       !lessonNote ||
       (!questionText && questionType !== "file-upload") ||
       !questionType ||
-      !marks
+      !marks ||
+      !correctAnswer
     ) {
       throw new BadRequestError("Please provide all required fields.");
     }
@@ -234,7 +235,60 @@ export const createQuestion = async (req, res, next) => {
 
 export const getAllQuestions = async (req, res, next) => {
   try {
-    const questions = await Question.find().populate([
+    const {
+      subjectTeacher,
+      subject,
+      evaluationType,
+      classId,
+      term,
+      session,
+      lessonWeek,
+      topic,
+      subTopic,
+      questionType,
+      marks,
+    } = req.query;
+
+    // Build a query object based on provided filters
+    const queryObject = {};
+
+    //queryObject["student.name"] = { $regex: name, $options: "i" }; // Case-insensitive search
+
+    if (subjectTeacher) {
+      queryObject["subjectTeacher"] = { $regex: subjectTeacher, $options: "i" }; // Case-insensitive search
+    }
+    if (subject) {
+      queryObject["subject"] = subject;
+    }
+    if (evaluationType) {
+      queryObject["evaluationType"] = evaluationType;
+    }
+    if (questionType) {
+      queryObject["questionType"] = questionType;
+    }
+    if (classId) {
+      queryObject["classId"] = classId;
+    }
+    if (lessonWeek) {
+      queryObject["lessonWeek"] = lessonWeek;
+    }
+    if (topic) {
+      queryObject["topic"] = topic;
+    }
+    if (marks) {
+      queryObject["marks"] = marks;
+    }
+    if (subTopic) {
+      queryObject["subTopic"] = subTopic;
+    }
+    if (term) {
+      queryObject["term"] = term;
+    }
+    if (session) {
+      queryObject["session"] = session;
+    }
+
+    const questions = await Question.find(queryObject).populate([
       {
         path: "classId",
         select: "_id className",
@@ -252,22 +306,6 @@ export const getAllQuestions = async (req, res, next) => {
         select: "_id lessonweek lessonPeriod",
       },
     ]);
-    /*
-          .populate([
-        {
-          path: "teacher",
-          select: "_id name",
-        },
-        {
-          path: "classId",
-          select: "_id className",
-        },
-        {
-          path: "subject",
-          select: "_id subjectName subjectCode",
-        },
-      ])
-    */
     res.status(StatusCodes.OK).json({ count: questions.length, questions });
   } catch (error) {
     next(new BadRequestError(error.message));
@@ -397,16 +435,6 @@ export const updateQuestion = async (req, res, next) => {
         throw new NotFoundError("Provided subjectTeacher not found.");
       }
 
-      // const isAssignedSubject = teacher.subjects.some((subjectItem) => {
-      //   console.log(
-      //     "Comparing subjectItem: ",
-      //     subjectItem,
-      //     " with subject: ",
-      //     subject,
-      //   );
-      //   return subjectItem && subjectItem.equals(subject);
-      // });
-
       const isAssignedSubject = teacher.subjects.some(
         (subjectItem) => subjectItem && subjectItem.equals(subject),
       );
@@ -471,34 +499,6 @@ export const updateQuestion = async (req, res, next) => {
       // Add the files to the update data
       updateData.files = uploadedFiles;
     }
-
-    /*// If questionType is "file-upload," handle the uploaded file
-    if (questionType === "file-upload" && req.file) {
-      const { path: fileUrl, mimetype, size } = req.file; // Extract file details
-
-      // Check allowed mimetypes
-      const allowedTypes = [
-        "application/pdf",
-        "application/msword",
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      ];
-      if (!allowedTypes.includes(mimetype)) {
-        throw new BadRequestError("Invalid file type.");
-      }
-
-      // Validate file size (5MB limit)
-      if (size > 5 * 1024 * 1024) {
-        throw new BadRequestError("File size must not exceed 5MB.");
-      }
-
-      // Add file details to the update data
-      updateData.file = {
-        url: fileUrl,
-        fileType: mimetype.split("/")[1], // Extract type (e.g., pdf, doc)
-        fileSize: size,
-      };
-    }*/
 
     // Update the question
     const updatedQuestion = await Question.findByIdAndUpdate(id, updateData, {
@@ -609,14 +609,6 @@ export const deleteQuestion = async (req, res, next) => {
         // Determine if the file is a raw resource
         const isRawFile = file.url.includes("/raw/");
 
-        // Log the extracted public_id and resource type for debugging
-        // console.log(
-        //   "Deleting file with public_id:",
-        //   publicId,
-        //   "resource_type:",
-        //   isRawFile ? "raw" : "image",
-        // );
-
         // Delete from Cloudinary
         return cloudinary.uploader.destroy(publicId, {
           resource_type: isRawFile ? "raw" : "image",
@@ -625,9 +617,6 @@ export const deleteQuestion = async (req, res, next) => {
 
       // Wait for all files to be deleted
       const deleteResults = await Promise.all(deletePromises);
-
-      // Log results for debugging
-      // console.log("Cloudinary delete results:", deleteResults);
     }
 
     // Delete the question from the database

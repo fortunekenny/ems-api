@@ -1,52 +1,46 @@
 import express from "express";
 import {
-  getAttendanceForStudent,
-  markAttendanceForToday,
-  getAttendanceForClass,
-  getClassAttendanceForToday,
+  markStudentAttendanceForMorning,
+  markStudentAttendanceForAfternoon,
+  getAllAttendanceRecords,
+  getAttendanceById,
   deleteStudentAttendanceForTerm,
 } from "../controllers/attendanceController.js";
 import {
   authenticateToken,
   authorizeRole,
-  authorizeClassTeacherOrAdminOrParent,
-  authorizeClassTeacherOrAdmin,
 } from "../middleware/authentication.js";
 import { checkStatus } from "../utils/checkStatus.js";
 
 const router = express.Router();
 
+router.get(
+  "/",
+  authenticateToken,
+  checkStatus,
+  authorizeRole("admin", "proprietor", "teacher"),
+  getAllAttendanceRecords,
+);
+router.get(
+  "/attendanceId",
+  authenticateToken,
+  checkStatus,
+  authorizeRole("admin", "proprietor", "teacher", "student", "parent"),
+  getAttendanceById,
+);
 router.patch(
-  "/student/:studentId/mark",
+  "/:studentId/markMorning",
   authenticateToken,
   checkStatus,
-  // authorizeClassTeacherOrAdmin,
-  authorizeRole("admin proprietor teacher"),
-  markAttendanceForToday,
-);
-router.get(
-  "/student/:studentId/attendance",
-  authenticateToken,
-  checkStatus,
-  // authorizeClassTeacherOrAdminOrParent,
-  authorizeRole("admin", "proprietor", "teacher", "parent", "student"),
-  getAttendanceForStudent,
-);
-router.get(
-  "/class/:classId/attendance",
-  authenticateToken,
-  checkStatus,
-  // authorizeClassTeacherOrAdmin,
   authorizeRole("admin", "proprietor", "teacher"),
-  getAttendanceForClass,
+  markStudentAttendanceForMorning,
 );
-router.get(
-  "/class/:classId/today",
+router.patch(
+  "/:studentId/markAfternoon",
   authenticateToken,
   checkStatus,
-  // authorizeClassTeacherOrAdmin,
   authorizeRole("admin", "proprietor", "teacher"),
-  getClassAttendanceForToday,
+  markStudentAttendanceForAfternoon,
 );
 
 router.delete(

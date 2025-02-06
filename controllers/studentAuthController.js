@@ -6,8 +6,10 @@ import Subject from "../models/SubjectModel.js";
 import Attendance from "../models/AttendanceModel.js";
 import { StatusCodes } from "http-status-codes";
 import BadRequestError from "../errors/bad-request.js";
+import Forbidden from "../errors/forbidden.js";
 import createTokenUser from "../utils/createTokenUser.js";
 import { attachCookiesToResponse } from "../utils/jwt.js";
+import generateID from "../utils/generateId.js";
 import {
   getCurrentTermDetails,
   startTermGenerationDate,
@@ -31,24 +33,41 @@ const getSchoolDays = (startDate, endDate) => {
 };
 
 // Register Student and create attendance
-export const registerStudent = async (req, res) => {
-  const { role, userId } = req.user;
-  const { name, email, password, classId, age, gender, address, guardian } =
-    req.body;
+export const registerStudent = async (req, res, next) => {
+  const {
+    firstName,
+    middleName,
+    lastName,
+    houseNumber,
+    streetName,
+    townOrCity,
+    password,
+    classId,
+    age,
+    gender,
+    guardian,
+  } = req.body;
 
   // Validate required fields
-  if (!name || !email || !password || !age || !gender || !address || !classId) {
-    throw new BadRequestError(
-      "Please provide all required fields, including classId",
-    );
+  if (
+    !firstName ||
+    !middleName ||
+    !lastName ||
+    !streetName ||
+    !townOrCity ||
+    !age ||
+    !gender ||
+    !classId
+  ) {
+    throw new BadRequestError("Please provide all required fields");
   }
+
+  const { role, userId } = req.user;
 
   try {
     // Role validation: Only parent or admin can register a student
-    if (role !== "parent" && role !== "admin") {
-      return res.status(StatusCodes.FORBIDDEN).json({
-        error: "Access denied. Only parents or admins can register students.",
-      });
+    if (role !== "parent" && role !== "admin" && role !== "proprietor") {
+      throw new Forbidden("Only parents can register students.");
     }
 
     let parent = null;
@@ -64,7 +83,7 @@ export const registerStudent = async (req, res) => {
       guardianId = parent._id;
     }
 
-    if (role === "admin") {
+    if (role === "admin" || role !== "proprietor") {
       if (!guardian) {
         throw new BadRequestError(
           "Admin must assign a guardian (parent) for the student.",
@@ -80,30 +99,38 @@ export const registerStudent = async (req, res) => {
       guardianId = assignedGuardian._id;
     }
 
-    const emailAlreadyExists = await Student.findOne({ email });
-    if (emailAlreadyExists) {
-      throw new BadRequestError("Student email already exists");
-    }
-
     // Generate current term details using start date and holiday durations
-    const termDetails = getCurrentTermDetails(
+    const { term, session, startDate, endDate } = getCurrentTermDetails(
       startTermGenerationDate,
       holidayDurationForEachTerm,
     );
-    const { term, startDate, endDate } = termDetails;
+
+    console.log(
+      "studentId",
+      await generateID("STU", firstName, middleName, lastName),
+    );
+
+    await Student.collection.dropIndex("email_1");
+    await Student.createIndexes();
 
     // Create and save the new student
     const student = new Student({
-      name,
-      email,
+      firstName,
+      middleName,
+      lastName,
+      houseNumber,
+      streetName,
+      townOrCity,
+      studentID: await generateID("STU", firstName, middleName, lastName),
+      // email: req.body.email || undefined,
+      email: req.body.email == null ? undefined : req.body.email,
       password,
       classId,
       guardian: guardianId,
       age,
       gender,
-      address,
       term,
-      session: "2024/2025",
+      session,
     });
 
     await student.save();
@@ -150,16 +177,19 @@ export const registerStudent = async (req, res) => {
     // Generate school days and attendance records
     const schoolDays = getSchoolDays(new Date(startDate), new Date(endDate));
     const attendanceIds = [];
+
     for (const date of schoolDays) {
       const attendance = new Attendance({
         student: student._id,
         classId: classId,
         date: date,
-        status: "Pending",
+        morningStatus: "pending", // Separate status for morning attendance
+        afternoonStatus: "pending", // Separate status for afternoon attendance
         session: student.session,
         term: student.term,
-        classTeacher: classTeacher, // Add classTeacher to attendance
+        classTeacher: classTeacher, // Assign class teacher
       });
+
       const savedAttendance = await attendance.save();
       attendanceIds.push(savedAttendance._id);
     }
@@ -170,11 +200,35 @@ export const registerStudent = async (req, res) => {
     const tokenUser = createTokenUser(student);
     attachCookiesToResponse({ res, user: tokenUser });
 
+    const populatedStudent = await Student.findById(student._id)
+      .select("-password")
+      .populate([
+        {
+          path: "classId",
+          select: "_id className classTeacher subjectTeachers subjects",
+          populate: [
+            { path: "classTeacher", select: "_id name" },
+            { path: "subjectTeachers", select: "_id name" },
+            { path: "subjects", select: "_id subjectName" },
+          ],
+        },
+        { path: "guardian", select: "_id name" },
+      ]);
+
     res.status(StatusCodes.CREATED).json({
-      student,
+      message: "Student registered successfully",
+      populatedStudent,
       token: tokenUser,
     });
   } catch (error) {
-    res.status(StatusCodes.BAD_REQUEST).json({ error: error.message });
+    if (error.code === 11000) {
+      console.error("Error registering student:", error);
+      throw new BadRequestError("There is a dublicate error of unique values.");
+    }
+
+    console.error("Error registering student:", error);
+    next(new BadRequestError(error.message));
+
+    // throw error;
   }
 };

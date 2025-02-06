@@ -56,7 +56,13 @@ const examSchema = new mongoose.Schema({
       message: "Invalid time format. Expected format: HH:MM AM/PM",
     },
   },
-  studentId: { type: mongoose.Schema.Types.ObjectId, ref: "Student" }, // Id of student who submited this exam
+  marksObtainable: {
+    type: Number,
+    required: false,
+    min: [1, "Marks should be greater than or equal to 1"],
+    max: [60, "Marks should not exceed 60"],
+  },
+  // studentId: { type: mongoose.Schema.Types.ObjectId, ref: "Student" }, // Id of student who submited this exam
   students: [{ type: mongoose.Schema.Types.ObjectId, ref: "Student" }], // List of students who are doing this exam
   submitted: [
     {

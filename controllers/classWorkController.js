@@ -10,7 +10,7 @@ import { StatusCodes } from "http-status-codes";
 
 export const createClassWork = async (req, res, next) => {
   try {
-    const { lessonNote, questions } = req.body;
+    const { lessonNote, questions, marksObtainable } = req.body;
     const { id: userId, role: userRole } = req.user;
 
     // Validate required fields
@@ -22,6 +22,9 @@ export const createClassWork = async (req, res, next) => {
     if (!lessonNote) {
       throw new BadRequestError("Lesson note must be provided.");
     }
+    // if (!marksObtainable) {
+    //   throw new BadRequestError("MarksObtainable must be provided.");
+    // }
 
     // Fetch and validate the lesson note
     const note = await LessonNote.findById(lessonNote).populate(
@@ -117,7 +120,7 @@ export const createClassWork = async (req, res, next) => {
         throw new BadRequestError(
           `Question at index ${
             index + 1
-          } does not match the class, subject, or term.`,
+          } does not match either the class or subject or term.`,
         );
       }
     }
@@ -166,7 +169,48 @@ export const createClassWork = async (req, res, next) => {
 // Get All ClassWorks
 export const getAllClassWorks = async (req, res, next) => {
   try {
-    const classWorks = await ClassWork.find().populate([
+    const {
+      subjectTeacher,
+      subject,
+      evaluationType,
+      classId,
+      term,
+      session,
+      lessonWeek,
+      topic,
+    } = req.query;
+
+    // Build a query object based on provided filters
+    const queryObject = {};
+
+    //queryObject["student.name"] = { $regex: name, $options: "i" }; // Case-insensitive search
+
+    if (subjectTeacher) {
+      queryObject["subjectTeacher"] = { $regex: subjectTeacher, $options: "i" }; // Case-insensitive search
+    }
+    if (subject) {
+      queryObject["subject"] = subject;
+    }
+    if (evaluationType) {
+      queryObject["evaluationType"] = evaluationType;
+    }
+    if (classId) {
+      queryObject["classId"] = classId;
+    }
+    if (lessonWeek) {
+      queryObject["lessonWeek"] = lessonWeek;
+    }
+    if (topic) {
+      queryObject["topic"] = topic;
+    }
+    if (term) {
+      queryObject["term"] = term;
+    }
+    if (session) {
+      queryObject["session"] = session;
+    }
+
+    const classWorks = await ClassWork.find(queryObject).populate([
       { path: "questions", select: "_id questionType questionText options" },
       {
         path: "classId",
@@ -239,14 +283,14 @@ export const updateClassWork = async (req, res, next) => {
       throw new NotFoundError("ClassWork not found.");
     }
 
-    const { subject, questions, classId, term } = classWork; // Use data from the existing classWork document
+    const { subject, questions, classId, term, subjectTeacher } = classWork; // Use data from the existing classWork document
 
     let subjectTeacherId;
     let isAuthorized = false;
 
     if (["admin", "proprietor"].includes(userRole)) {
       isAuthorized = true;
-      subjectTeacherId = req.body.subjectTeacher;
+      subjectTeacherId = subjectTeacher;
 
       // Ensure 'subjectTeacher' field is provided
       if (!subjectTeacherId) {
@@ -268,7 +312,7 @@ export const updateClassWork = async (req, res, next) => {
 
       if (!isAssignedSubject) {
         throw new BadRequestError(
-          "The specified subjectTeacher is not assigned to the selected subject.",
+          "The specified subject teacher is not assigned to the selected subject.",
         );
       }
     } else if (userRole === "teacher") {

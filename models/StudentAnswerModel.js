@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { Schema } from "mongoose";
 import {
   getCurrentTermDetails,
   startTermGenerationDate, // Ensure this is correctly defined
@@ -278,13 +279,6 @@ const studentAnswerSchema = new mongoose.Schema(
       ref: "LessonNote", // Reference to the LessonNote model
       required: [false, "Please provide a lesson note"],
     },
-    // questions: [
-    //   {
-    //     type: mongoose.Schema.Types.ObjectId,
-    //     ref: "Question", // Reference to the Question model
-    //     required: [false, "Question ID is required."],
-    //   },
-    // ],
     answers: [
       {
         questionId: {
@@ -293,22 +287,19 @@ const studentAnswerSchema = new mongoose.Schema(
           required: [true, "Question ID is required."],
         },
         answer: {
-          type: String,
+          type: [Schema.Types.Mixed], // Allows strings and numbers in the array
           required: function () {
             return this.questionType !== "file-upload";
           },
           validate: {
             validator: function (value) {
-              if (
-                this.questionType !== "file-upload" ||
-                this.questionType !== "essay" ||
-                this.questionType !== "short-answer"
-              ) {
-                return value && value.length > 0;
+              // Ensure the field is required for non-file-upload question types
+              if (this.questionType !== "file-upload") {
+                return Array.isArray(value) && value.length > 0;
               }
               return true; // Skip validation for file-upload type
             },
-            message: "Answer cannot be empty.",
+            message: "Answer cannot be empty for this question type.",
           },
         },
         files: [
@@ -337,6 +328,14 @@ const studentAnswerSchema = new mongoose.Schema(
         },
       },
     ],
+    markObtained: {
+      type: Number,
+      default: 0,
+    }, // Total marks awarded for all answers  (calculated dynamically)
+    grade: {
+      type: String,
+      required: false,
+    },
     classId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Class", // Reference to the Class model
@@ -380,156 +379,3 @@ studentAnswerSchema.pre("validate", function (next) {
 const StudentAnswer = mongoose.model("StudentAnswer", studentAnswerSchema);
 
 export default StudentAnswer;
-
-/*const studentAnswerSchema = new mongoose.Schema({
-  student: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "Student", // Reference to the Student model
-    required: [false, "Student ID is required."],
-  },
-  subject: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "Subject", // Reference to the Subject model
-    required: [false, "Subject ID is required."],
-  },
-  evaluationType: {
-    type: String,
-    enum: ["Test", "Assignment", "ClassWork", "Exam"],
-    required: [true, "Evaluation type is required."],
-  },
-  evaluationTypeId: {
-    type: mongoose.Schema.Types.ObjectId,
-    // ref: ["Test", "Assignment", "ClassWork", "Exam"],
-    required: [true, "Evaluation ID is required."],
-  },
-  lessonNote: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "LessonNote", // Reference to the LessonNote model
-    required: [false, "Please provide a lesson note"],
-  },
-  question: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "Question", // Reference to the Question model
-    required: [false, "Question ID is required."],
-  },
-  answer: {
-    type: String,
-    required: [true, "Answer is required."],
-    validate: {
-      validator: (value) => validator.isLength(value, { min: 1 }),
-      message: "Answer cannot be empty.",
-    },
-  },
-  isCorrect: {
-    type: Boolean,
-    default: false, // Indicates if the answer is correct or not
-  },
-  marksAwarded: {
-    type: Number,
-    default: 0, // Marks awarded for the answer
-    min: [0, "Marks cannot be negative."],
-    max: [100, "Marks cannot exceed 100."],
-    validate: {
-      validator: Number.isInteger,
-      message: "Marks awarded must be an integer.",
-    },
-  },
-  explanation: {
-    type: String,
-    validate: {
-      validator: (value) =>
-        value === undefined || validator.isLength(value, { max: 500 }),
-      message: "Explanation cannot exceed 500 characters.",
-    },
-  },
-  classId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "Class", // Reference to the Class model
-    // required: [true, "Class ID is required."],
-  },
-  session: {
-    type: String,
-  },
-  term: {
-    type: String,
-  },
-  lessonWeek: {
-    type: Number, // Week number of the term (calculated dynamically)
-  },
-  createdAt: {
-    type: Date,
-    default: Date.now, // Timestamp when the answer was submitted
-  },
-  updatedAt: {
-    type: Date,
-    default: Date.now, // Timestamp when the answer was last updated
-  },
-});*/
-
-/*
-const checkAnswer = async (req, res) => {
-  try {
-    const { studentAnswerId } = req.params;
-
-    const studentAnswer = await StudentAnswer.findById(studentAnswerId).populate("question");
-
-    if (!studentAnswer) throw new Error("Answer not found");
-
-    const isCorrect = studentAnswer.answer === studentAnswer.question.correctAnswer;
-    studentAnswer.isCorrect = isCorrect;
-
-    // Optionally award marks
-    studentAnswer.marksAwarded = isCorrect ? studentAnswer.question.marks : 0;
-
-    await studentAnswer.save();
-
-    res.status(200).json({ message: "Answer checked successfully", studentAnswer });
-  } catch (error) {
-    res.status(400).json({ error: error.message });
-  }
-};
-
-*/
-
-/*
-Example of Saving a Student's Answer:
-
-import StudentAnswer from "./models/StudentAnswer"; // Assuming the path is correct
-
-// Example data
-const studentId = "someStudentId"; // Replace with actual student ID
-const questionId = "someQuestionId"; // Replace with actual question ID
-const answer = "Option A"; // Replace with actual answer
-const classId = "someClassId"; // Replace with actual class ID
-
-const studentAnswer = new StudentAnswer({
-  student: studentId,
-  question: questionId,
-  answer: answer,
-  classId: classId,
-});
-
-await studentAnswer.save();  // This will trigger pre-validation and set the session, term, and week if not provided
-
-*/
-
-/*
-Retrieving Student Answers:
-
-// Find all answers for a specific student in a specific term and session
-const studentAnswers = await StudentAnswer.find({ student: studentId, session: '2024/2025', term: 'First Term' })
-  .populate("question");
-
-// Find a specific answer for a particular question
-const studentSpecificAnswer = await StudentAnswer.findOne({ student: studentId, question: questionId })
-  .populate("question");
-
-*/
-
-/*
-
-*/
-
-/*
-in the StudentAnswer.questions get each questions question.questionType, question.correctanswer if questionType is multiple-choice, true/false, or rank-order check it 
-*/

@@ -2,7 +2,7 @@ import express from "express";
 import {
   createStudentAnswer,
   getAllStudentsAnswer,
-  getAnswersForStudentAndSubject,
+  getStudentAnswersById,
   updateStudentAnswer,
   deleteStudentAnswer,
   getStudentAnswersByEvaluation,
@@ -41,12 +41,13 @@ router.get(
   getAllStudentsAnswer,
 );
 router.get(
-  "/:studentId/:subjectId",
+  "/:studentAnswerId",
   authenticateToken,
   checkStatus,
-  authorizeRole("admin", "teacher", "proprietor", "student"),
-  getAnswersForStudentAndSubject,
-); // Fetch answers by student and subject
+  authorizeRole("admin", "teacher", "proprietor", "student", "parent"),
+  getStudentAnswersById,
+); // Fetch answers by studentAnswerId
+
 router.get(
   "/student/:studentId/evaluation/:evaluationTypeId/answers",
   authenticateToken,

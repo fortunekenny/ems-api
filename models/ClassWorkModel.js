@@ -42,6 +42,7 @@ const classWorkSchema = new mongoose.Schema({
     { type: mongoose.Schema.Types.ObjectId, ref: "Question", required: true },
   ],
   // dueDate: { type: Date, required: true },
+  marksObtainable: { type: Number, required: false },
   students: [{ type: mongoose.Schema.Types.ObjectId, ref: "Student" }], // List of students who received the classWork
   submitted: [
     {

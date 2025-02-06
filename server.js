@@ -152,12 +152,44 @@ const start = async () => {
   try {
     await connectDB(process.env.MONGO_URL);
     app.listen(port, () => {
+      console.log(`ems server is listening on port ${port}...`);
+    });
+  } catch (error) {
+    console.log(error);
+  }
+};
+
+/*const start = async () => {
+  try {
+    await connectDB(process.env.MONGO_URL);
+      useNewUrlParser: true,
+  useUnifiedTopology: true,
+  serverSelectionTimeoutMS: 30000, // Increase server selection timeout
+  socketTimeoutMS: 45000, // Increase socket timeout
+    app.listen(port, () => {
       console.log(`EMS server is listening on port ${port}...`);
     });
   } catch (error) {
     console.error(error);
     process.exit(1);
   }
-};
+};*/
 
+/*const start = async () => {
+  try {
+    await connectDB(process.env.MONGO_URL, {
+      useNewUrlParser: true,
+      useUnifiedTopology: true,
+      serverSelectionTimeoutMS: 100000, // Increase server selection timeout
+      socketTimeoutMS: 90000, // Increase socket timeout
+    });
+
+    app.listen(port, () => {
+      console.log(`EMS server is listening on port ${port}...`);
+    });
+  } catch (error) {
+    console.error("Error starting the server:", error);
+    process.exit(1); // Exit the process with a failure code
+  }
+};*/
 start();
