@@ -38,6 +38,13 @@ router.patch(
   parentController.updateParentStatus,
 );
 
+router.patch(
+  "/:studentId/assignParent",
+  authenticateToken, // Middleware to authenticate the user
+  authorizeRole("admin", "proprietor"), // Only admins can update parent status
+  parentController.assignParentToStudent,
+);
+
 router.delete(
   "/:id",
   authenticateToken,

@@ -51,6 +51,12 @@ router
     [authenticateToken, checkStatus, authorizeRole("admin", "proprietor")],
     staffController.updateStaffStatus,
   );
+router
+  .route("/staff/:id/verify")
+  .patch(
+    [authenticateToken, checkStatus, authorizeRole("admin", "proprietor")],
+    staffController.updateStaffVerification,
+  );
 
 /*
 // Staff routes

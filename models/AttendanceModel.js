@@ -1,9 +1,14 @@
 import mongoose from "mongoose";
 import {
   getCurrentTermDetails,
-  startTermGenerationDate, // Make sure these are correctly defined elsewhere
-  holidayDurationForEachTerm, // Make sure these are correctly defined elsewhere
+  startTermGenerationDate, // Ensure this is correctly defined
+  holidayDurationForEachTerm, // Ensure this is correctly defined
 } from "../utils/termGenerator.js"; // Import getCurrentTermDetails
+
+const { session, term, weekOfTerm } = getCurrentTermDetails(
+  startTermGenerationDate,
+  holidayDurationForEachTerm,
+);
 
 const attendanceSchema = new mongoose.Schema({
   student: {
@@ -39,10 +44,13 @@ const attendanceSchema = new mongoose.Schema({
   },
   session: {
     type: String,
+    default: session,
   },
   term: {
     type: String,
+    default: term,
   },
+  weekOfTerm: { type: Number, default: weekOfTerm },
   timeMarkedMorning: {
     type: Date,
     default: null, // Timestamp for marking morning attendance
@@ -136,14 +144,14 @@ attendanceSchema.pre("validate", function (next) {
     const startDate = startTermGenerationDate; // Use the startTermGenerationDate instead of 'now'
 
     // If session or term is not provided, generate them
-    if (!this.session || !this.term) {
+    /*     if (!this.session || !this.term) {
       const { session, term } = getCurrentTermDetails(
         startDate,
         holidayDurationForEachTerm,
       ); // Pass the start date and holiday durations
       if (!this.session) this.session = session; // Set session if not provided
       if (!this.term) this.term = term; // Set term if not provided
-    }
+    } */
   }
   next();
 });

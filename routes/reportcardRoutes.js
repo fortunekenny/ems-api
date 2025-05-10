@@ -16,6 +16,14 @@ router.post(
   authorizeRole("admin", "proprietor", "teacher"),
   reportCardController.createReportCard,
 );
+// Create class report card
+router.post(
+  "/allClassStudents",
+  authenticateToken,
+  checkStatus,
+  authorizeRole("admin", "proprietor", "teacher"),
+  reportCardController.createReportCardsForClass,
+);
 
 router.get(
   "/",

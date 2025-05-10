@@ -49,6 +49,7 @@ const gradeSchema = new mongoose.Schema({
   markObtained: { type: Number, default: 0 },
   percentageScore: { type: Number, default: 0 },
   markObtainable: { type: Number, default: 100 },
+  position: { type: Number }, // Student's position in the subject
   grade: { type: String },
   remark: { type: String }, // Teacher's comment on student performance
   session: { type: String, default: session }, // e.g., 2023/2024

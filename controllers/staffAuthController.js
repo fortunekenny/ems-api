@@ -5,12 +5,14 @@ import { attachCookiesToResponse } from "../utils/jwt.js";
 import Staff from "../models/StaffModel.js";
 import Class from "../models/ClassModel.js";
 import Subject from "../models/SubjectModel.js";
-import Attendance from "../models/AttendanceModel.js"; // Ensure Attendance model is imported
+import Attendance from "../models/AttendanceModel.js"; // Ensure
 import {
-  generateCurrentTerm,
+  getCurrentTermDetails,
   startTermGenerationDate,
   holidayDurationForEachTerm,
 } from "../utils/termGenerator.js";
+import generateID from "../utils/generateId.js";
+import calculateAge from "../utils/ageCalculate.js";
 
 // Helper function to validate term and session consistency
 const isValidTermAndSession = (subject, term, session) =>
@@ -104,7 +106,16 @@ const assignSubjectTeacherAndUpdateClass = async (
 
 export const registerStaff = async (req, res) => {
   const {
-    name,
+    firstName,
+    middleName,
+    lastName,
+    houseNumber,
+    streetName,
+    townOrCity,
+    phoneNumber,
+    dateOfBirth,
+    age,
+    gender,
     email,
     password,
     role,
@@ -115,18 +126,31 @@ export const registerStaff = async (req, res) => {
   } = req.body;
 
   // Validate required fields
-  if (!email || !password || !name || !role) {
-    throw new BadRequestError("Please provide email, password, name, and role");
+  if (
+    !email ||
+    !password ||
+    !role ||
+    !firstName ||
+    !middleName ||
+    !lastName ||
+    !streetName ||
+    !townOrCity ||
+    !dateOfBirth ||
+    !phoneNumber ||
+    !age ||
+    !gender
+  ) {
+    throw new BadRequestError("Please provide all required fields.");
   }
 
   // Check if email already exists
   const emailAlreadyExists = await Staff.findOne({ email });
   if (emailAlreadyExists) {
-    throw new BadRequestError("Email already exists");
+    throw new BadRequestError("Email already exist, kindly login");
   }
 
   // Generate the current term based on the provided start date and holiday durations
-  const term = generateCurrentTerm(
+  const { term, session } = getCurrentTermDetails(
     startTermGenerationDate,
     holidayDurationForEachTerm,
   );
@@ -134,14 +158,25 @@ export const registerStaff = async (req, res) => {
   try {
     // Create Staff user
     const staff = await Staff.create({
-      name,
+      firstName,
+      middleName,
+      lastName,
+      houseNumber,
+      streetName,
+      townOrCity,
+      phoneNumber,
+      dateOfBirth,
+      age: calculateAge(dateOfBirth),
+      gender,
       email,
       password,
       role,
+      employeeID: await generateID("EMP", firstName, middleName, lastName),
       department,
       subjects,
       classes,
-      term, // Store the current term
+      term,
+      session,
       isClassTeacher,
     });
 

@@ -5,6 +5,7 @@ import NotFoundError from "../errors/not-found.js";
 import StudentAnswer from "../models/StudentAnswerModel.js";
 import Staff from "../models/StaffModel.js";
 import mongoose from "mongoose";
+import InternalServerError from "../errors/internal-server-error.js";
 
 // Create a grade
 export const createGrade = async (req, res, next) => {
@@ -157,6 +158,37 @@ export const createGrade = async (req, res, next) => {
     });
     await newGrade.save();
 
+    //Compute the student's position (ranking) based on percentageScore.
+    // Retrieve all report cards for the class, term, and session, sorted descending.
+
+    const allGrades = await Grade.find({
+      classId,
+      term,
+      session,
+    }).sort({ percentageScore: -1 });
+
+    let currentRank = 0;
+    let lastPercentage = null;
+    let rankCounter = 0;
+
+    for (const g of allGrades) {
+      rankCounter++;
+      // If first record or current percentage is less than previous, update rank.
+      if (lastPercentage === null || g.percentageScore < lastPercentage) {
+        currentRank = rankCounter;
+      }
+      // Else if equal, currentRank remains the same (tie).
+      lastPercentage = g.percentageScore;
+      if (g._id.equals(grade._id)) {
+        // Update the newly created report card's position in the database.
+        await Grade.findByIdAndUpdate(grade._id, {
+          position: currentRank,
+        });
+        grade.position = currentRank;
+        break;
+      }
+    }
+
     const populatedGrade = await Grade.findById(newGrade._id).populate([
       // { path: "exam", select: "_id totalScore" },
       // { path: "tests", select: "_id totalScore" },
@@ -172,58 +204,189 @@ export const createGrade = async (req, res, next) => {
     });
   } catch (error) {
     console.error("Error creating test:", error);
-    next(new BadRequestError(error.message));
+    next(new InternalServerError(error.message));
   }
 };
 
 // Get all grades
 export const getGrades = async (req, res, next) => {
   try {
-    const { firstName, middleName, lastName, subject, classId, term, session } =
+    const allowedFilters = [
+      "student",
+      "subject",
+      "classId",
+      "term",
+      "session",
+      "sort",
+      "page",
+      "limit",
+    ];
+
+    // Get provided query keys
+    const providedFilters = Object.keys(req.query);
+
+    // Check for unknown parameters (ignore case differences if needed)
+    const unknownFilters = providedFilters.filter(
+      (key) => !allowedFilters.includes(key),
+    );
+
+    if (unknownFilters.length > 0) {
+      // Return error if unknown parameters are present
+      throw new BadRequestError(
+        `Unknown query parameter(s): ${unknownFilters.join(", ")}`,
+      );
+    }
+
+    const { student, subject, classId, term, session, sort, page, limit } =
       req.query;
 
-    // Build a query object based on provided filters
-    const queryObject = {};
+    // Build an initial match stage for fields stored directly on Assignment
+    const matchStage = {};
 
-    /*     if (student) {
-      queryObject["student.name"] = { $regex: name, $options: "i" }; // Case-insensitive search
-      // queryObject["student"] = { $regex: student, $options: "i" }; // Case-insensitive search
-    } */
-    if (firstName) {
-      queryObject["firstName"] = { $regex: firstName, $options: "i" }; // Case-insensitive search
-    }
-    if (middleName) {
-      queryObject["middleName"] = { $regex: middleName, $options: "i" }; // Case-insensitive search
-    }
-    if (lastName) {
-      queryObject["lastName"] = { $regex: lastName, $options: "i" }; // Case-insensitive search
+    if (term) matchStage.term = { $regex: term, $options: "i" };
+    if (session) matchStage.session = session;
+
+    const pipeline = [];
+    pipeline.push({ $match: matchStage });
+
+    // Lookup to join subjectTeacher data from the "staff" collection
+    pipeline.push({
+      $lookup: {
+        from: "students", // collection name for staff (ensure this matches your DB)
+        localField: "student",
+        foreignField: "_id",
+        as: "studentData",
+      },
+    });
+    pipeline.push({ $unwind: "$studentData" });
+
+    // Lookup to join subject data from the "subjects" collection
+    pipeline.push({
+      $lookup: {
+        from: "subjects",
+        localField: "subject",
+        foreignField: "_id",
+        as: "subjectData",
+      },
+    });
+    pipeline.push({ $unwind: "$subjectData" });
+
+    // Lookup to join class data from the "classes" collection
+    pipeline.push({
+      $lookup: {
+        from: "classes",
+        localField: "classId",
+        foreignField: "_id",
+        as: "classData",
+      },
+    });
+    pipeline.push({ $unwind: "$classData" });
+
+    const joinMatch = {};
+
+    if (student) {
+      const studentRegex = {
+        $regex: `^${student}$`,
+        $options: "i",
+      };
+      joinMatch.$or = [
+        { "studentData.firstName": studentRegex },
+        { "studentData.middleName": studentRegex },
+        { "studentData.lastName": studentRegex },
+      ];
     }
     if (subject) {
-      queryObject["subject"] = subject;
+      const subjectRegex = { $regex: `^${subject}$`, $options: "i" };
+      joinMatch.$or = [
+        { "subjectData.subjectName": subjectRegex },
+        { "subjectData.subjectCode": subjectRegex },
+      ];
     }
     if (classId) {
-      queryObject["classId"] = classId;
+      joinMatch["classData.className"] = {
+        $regex: `^${classId}$`,
+        $options: "i",
+      };
     }
-    if (term) {
-      queryObject["term"] = term;
-    }
-    if (session) {
-      queryObject["session"] = session;
+    if (Object.keys(joinMatch).length > 0) {
+      pipeline.push({ $match: joinMatch });
     }
 
-    const grades = await Grade.find(queryObject).populate([
-      // { path: "exam", select: "_id totalScore" },
-      // { path: "tests", select: "_id totalScore" },
-      { path: "classId", select: "_id className" },
-      { path: "subject", select: "_id subjectName" },
-      { path: "student", select: "_id firstName middleName lastName" },
-      { path: "teacher", select: "_id name" },
-      // { path: "students", select: "_id firstName lastName" },
-    ]);
-    res.status(StatusCodes.OK).json({ count: grades.length, grades });
+    // Sorting stage: define sort options.
+    // Adjust the sort options to suit your requirements.
+    const sortOptions = {
+      newest: { createdAt: -1 },
+      oldest: { createdAt: 1 },
+      "a-z": { firstName: 1 },
+      "z-a": { firstName: -1 },
+      lastPosition: { position: -1 },
+      firstPosition: { position: 1 },
+      lowestPercentage: { percentageScore: -1 },
+      highestPercentage: { percentageScore: 1 },
+      lowestMarkObtained: { markObtained: -1 },
+      highestMarkObtained: { markObtained: 1 },
+    };
+    const sortKey = sortOptions[sort] || sortOptions.newest;
+    pipeline.push({ $sort: sortKey });
+
+    // Pagination stages: Calculate skip and limit.
+    const pageNumber = Number(page) || 1;
+    const limitNumber = Number(limit) || 10;
+    pipeline.push({ $skip: (pageNumber - 1) * limitNumber });
+    pipeline.push({ $limit: limitNumber });
+
+    // Projection stage: structure the output.
+    pipeline.push({
+      $project: {
+        _id: 1,
+        term: 1,
+        session: 1,
+        student: {
+          _id: "$studentData._id",
+          firstName: "$studentData.firstName",
+          middleName: "$studentData.middleName",
+          lastName: "$studentData.lastName",
+        },
+        subject: {
+          _id: "$subjectData._id",
+          subjectName: "$subjectData.subjectName",
+          subjectCode: "$subjectData.subjectCode",
+        },
+        classId: {
+          _id: "$classData._id",
+          className: "$classData.className",
+        },
+      },
+    });
+
+    // Execute the aggregation pipeline
+    const grades = await Grade.aggregate(pipeline);
+
+    // Count total matching documents for pagination.
+    // We use a similar pipeline without $skip, $limit, $sort, and $project.
+    const countPipeline = pipeline.filter(
+      (stage) =>
+        !(
+          "$skip" in stage ||
+          "$limit" in stage ||
+          "$sort" in stage ||
+          "$project" in stage
+        ),
+    );
+    countPipeline.push({ $count: "total" });
+    const countResult = await Grade.aggregate(countPipeline);
+    const totalGrades = countResult[0] ? countResult[0].total : 0;
+    const numOfPages = Math.ceil(totalGrades / limitNumber);
+
+    res.status(StatusCodes.OK).json({
+      count: totalGrades,
+      numOfPages,
+      currentPage: pageNumber,
+      grades,
+    });
   } catch (error) {
     console.error("Error getting grade:", error);
-    next(new BadRequestError(error.message));
+    next(new InternalServerError(error.message));
   }
 };
 

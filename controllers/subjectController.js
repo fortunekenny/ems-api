@@ -3,16 +3,12 @@ import Class from "../models/ClassModel.js"; // Import the Class model
 import { StatusCodes } from "http-status-codes";
 import BadRequestError from "../errors/bad-request.js";
 import NotFoundError from "../errors/not-found.js";
-import {
-  generateCurrentTerm,
-  startTermGenerationDate,
-  holidayDurationForEachTerm,
-} from "../utils/termGenerator.js"; // Import the term generation function
 import UnauthorizedError from "../errors/unauthorize.js"; // Direct import of UnauthorizedError
 import checkPermissions from "../utils/checkPermissions.js";
+import InternalServerError from "../errors/internal-server-error.js";
 
 // Create a new subject
-export const createSubject = async (req, res) => {
+export const createSubject = async (req, res, next) => {
   try {
     const {
       subjectName,
@@ -21,6 +17,7 @@ export const createSubject = async (req, res) => {
       subjectTeachers,
       classId,
       session,
+      term,
     } = req.body;
 
     // Check if subject already exists
@@ -28,11 +25,6 @@ export const createSubject = async (req, res) => {
     if (subjectAlreadyExists) {
       throw new BadRequestError("Subject already exists");
     }
-
-    const term = generateCurrentTerm(
-      startTermGenerationDate,
-      holidayDurationForEachTerm,
-    );
 
     // Create the subject
     const subject = new Subject({
@@ -62,19 +54,183 @@ export const createSubject = async (req, res) => {
       message: `Subject created and added to class ${assignedClass.className}`,
     });
   } catch (error) {
-    res.status(StatusCodes.BAD_REQUEST).json({ error: error.message });
+    console.error("Error in createSubject", error);
+    next(new InternalServerError(error.message));
   }
 };
 
 // Get all subjects
-export const getSubjects = async (req, res) => {
+export const getSubjects = async (req, res, next) => {
   try {
-    const subjects = await Subject.find();
-    res.status(StatusCodes.OK).json({ count: subjects.length, subjects });
+    const allowedFilters = [
+      "subject",
+      "subjectTeacher",
+      "classId",
+      "session",
+      "term",
+      "sort",
+      "page",
+      "limit",
+    ];
+
+    // Get provided query keys
+    const providedFilters = Object.keys(req.query);
+
+    // Check for unknown parameters (ignore case differences if needed)
+    const unknownFilters = providedFilters.filter(
+      (key) => !allowedFilters.includes(key),
+    );
+
+    if (unknownFilters.length > 0) {
+      // Return error if unknown parameters are present
+      throw new BadRequestError(
+        `Unknown query parameter(s): ${unknownFilters.join(", ")}`,
+      );
+    }
+
+    const {
+      subject,
+      subjectTeacher,
+      classId,
+      session,
+      term,
+      sort,
+      page,
+      limit,
+    } = req.query;
+
+    // Build an initial match stage for fields stored directly on Assignment
+    const matchStage = {};
+
+    if (term) matchStage.term = { $regex: term, $options: "i" };
+    if (session) matchStage.session = session;
+
+    if (subject) {
+      matchStage.$or = [
+        { subjectName: { $regex: subject, $options: "i" } },
+        { subjectCode: { $regex: subject, $options: "i" } },
+      ];
+    }
+
+    const pipeline = [];
+    pipeline.push({ $match: matchStage });
+
+    // Lookup to join subjectTeacher data from the "staff" collection
+    pipeline.push({
+      $lookup: {
+        from: "staffs", // collection name for staff (ensure this matches your DB)
+        localField: "subjectTeachers",
+        foreignField: "_id",
+        as: "subjectTeacherData",
+      },
+    });
+    pipeline.push({ $unwind: "$subjectTeacherData" });
+
+    // Lookup to join class data from the "classes" collection
+    pipeline.push({
+      $lookup: {
+        from: "classes",
+        localField: "classId",
+        foreignField: "_id",
+        as: "classData",
+      },
+    });
+    pipeline.push({ $unwind: "$classData" });
+
+    const joinMatch = {};
+
+    if (subjectTeacher) {
+      const subjectTeacherRegex = {
+        $regex: `^${subjectTeacher}$`,
+        $options: "i",
+      };
+      joinMatch.$or = [
+        {
+          "subjectTeacherData.firstName": subjectTeacherRegex,
+        },
+        {
+          "subjectTeacherData.middleName": subjectTeacherRegex,
+        },
+        {
+          "subjectTeacherData.lastName": subjectTeacherRegex,
+        },
+      ];
+    }
+
+    if (classId) {
+      joinMatch["classData.className"] = {
+        $regex: `^${classId}$`,
+        $options: "i",
+      };
+    }
+    if (Object.keys(joinMatch).length > 0) {
+      pipeline.push({ $match: joinMatch });
+    }
+
+    // Sorting stage: define sort options.
+    // Adjust the sort options to suit your requirements.
+    const sortOptions = {
+      newest: { createdAt: -1 },
+      oldest: { createdAt: 1 },
+      "a-z": { subjectName: 1 },
+      "z-a": { subjectName: -1 },
+    };
+    const sortKey = sortOptions[sort] || sortOptions.newest;
+    pipeline.push({ $sort: sortKey });
+
+    // Pagination stages: Calculate skip and limit.
+    const pageNumber = Number(page) || 1;
+    const limitNumber = Number(limit) || 10;
+    pipeline.push({ $skip: (pageNumber - 1) * limitNumber });
+    pipeline.push({ $limit: limitNumber });
+
+    // Projection stage: structure the output.
+    pipeline.push({
+      $project: {
+        _id: 1,
+        subjectName: 1,
+        subjectCode: 1,
+        term: 1,
+        session: 1,
+        subjectTeacher: {
+          _id: "$subjectTeacherData._id",
+          firstName: "$subjectTeacherData.firstName",
+          lastName: "$subjectTeacherData.lastName",
+        },
+        classId: {
+          _id: "$classData._id",
+          className: "$classData.className",
+        },
+      },
+    });
+    // Execute the aggregation pipeline
+    const subjects = await Subject.aggregate(pipeline);
+
+    // Count total matching documents for pagination.
+    // We use a similar pipeline without $skip, $limit, $sort, and $project.
+    const countPipeline = pipeline.filter(
+      (stage) =>
+        !(
+          "$skip" in stage ||
+          "$limit" in stage ||
+          "$sort" in stage ||
+          "$project" in stage
+        ),
+    );
+    countPipeline.push({ $count: "total" });
+    const countResult = await Subject.aggregate(countPipeline);
+    const totalSubjects = countResult[0] ? countResult[0].total : 0;
+    const numOfPages = Math.ceil(totalSubjects / limitNumber);
+
+    res.status(StatusCodes.OK).json({
+      count: totalSubjects,
+      numOfPages,
+      currentPage: pageNumber,
+      subjects,
+    });
   } catch (error) {
-    res
-      .status(StatusCodes.INTERNAL_SERVER_ERROR)
-      .json({ message: error.message });
+    console.error("Error in getting subjects", error);
+    next(new InternalServerError(error.message));
   }
 };
 

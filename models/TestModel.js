@@ -5,13 +5,6 @@ import {
   holidayDurationForEachTerm, // Ensure this is correctly defined
 } from "../utils/termGenerator.js";
 
-// console.log("startDate:", startTermGenerationDate);
-// console.log("holidayDurations:", holidayDurationForEachTerm);
-// console.log(
-//   "Term Details:",
-//   getCurrentTermDetails(startTermGenerationDate, holidayDurationForEachTerm),
-// );
-
 const testSchema = new mongoose.Schema({
   subjectTeacher: {
     type: mongoose.Schema.Types.ObjectId,
@@ -41,10 +34,9 @@ const testSchema = new mongoose.Schema({
           v,
         );
       },
-      message: "Invalid date format. Expected format: or dd/mm/yyyy",
+      message: "Invalid date format. Expected format: dd/mm/yyyy",
     },
   },
-
   week: {
     type: Number,
     required: true,

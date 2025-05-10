@@ -1,41 +1,50 @@
 import mongoose from "mongoose";
 import bcrypt from "bcryptjs"; // Import bcrypt for password hashing
-import { generateCurrentTerm } from "../utils/termGenerator.js";
-
-// Utility functions
-const generateID = async (prefix, Model) => {
-  const count = await Model.countDocuments();
-  const datePart = new Date()
-    .toISOString()
-    .replace(/[-T:\.Z]/g, "")
-    .slice(0, 8); // YYYYMMDD
-  return `${prefix}${datePart}${count + 1}`;
-};
-
-const getCurrentSession = () => {
-  const date = new Date();
-  const currentYear = date.getFullYear();
-  return `${currentYear}/${currentYear + 1}`;
-};
 
 // Define the schema
 const staffSchema = new mongoose.Schema({
   name: { type: String, required: true }, // Staff member's name
+  firstName: { type: String, required: true }, // Staff name at birth
+  middleName: { type: String, required: true }, // Staff second name
+  lastName: { type: String, required: true }, // Staff surname
+  houseNumber: { type: Number, required: false },
+  streetName: { type: String, required: true },
+  townOrCity: { type: String, required: true },
   email: { type: String, required: true, unique: true }, // Unique email
+  phoneNumber: {
+    type: Number,
+    required: true,
+  },
   password: { type: String, required: true }, // Password (hashed later)
-  employeeID: { type: String, required: true, unique: true }, // Employee ID generated automatically
+  employeeID: { type: String, unique: true }, // Employee ID generated automatically
   role: {
     type: String,
-    enum: ["admin", "teacher", "non-teacher", "proprietor"],
+    enum: ["admin", "teacher", "staff", "proprietor"],
     required: true,
   }, // Admin, teacher, or non-teacher roles. Input
   department: { type: String }, // Optional: For non-teaching staff or department-specific teachers. Input
-  subjects: [{ type: mongoose.Schema.Types.ObjectId, ref: "Subject" }], // Subjects assigned to teachers. Automated if isClassTeacher is inputed and input if teacher is subjects teacher
+  subjects: [{ type: mongoose.Schema.Types.ObjectId, ref: "Subject" }], // Subjects assigned to teachers. Automated if isClassTeacher is inputted and input if teacher is subjects teacher
   classes: [{ type: mongoose.Schema.Types.ObjectId, ref: "Class" }], // Classes assigned to teachers. Input if teacher is a subject teacher for more than 1 class
   isClassTeacher: { type: mongoose.Schema.Types.ObjectId, ref: "Class" }, // Reference to the class they are class teacher of. Input if a class teacher
   status: { type: String, enum: ["active", "inactive"], default: "active" }, // Automated
-  session: { type: String, required: true }, // Academic session. Automated
+  isVerified: { type: Boolean, default: false },
+  session: { type: String, required: false }, // Academic session. Automated
   term: { type: String, required: false }, // e.g., First, Second, Third term. Automated
+  dateOfBirth: {
+    type: String, // Store date as a string to validate custom format
+    required: [true, "Please provide date of birth"],
+    validate: {
+      validator: function (v) {
+        // Regular expression to validate dd/mm/yyyy format
+        return /^(0[1-9]|[12][0-9]|3[01])\/(0[1-9]|1[0-2])\/(\d{2}|\d{4})$/.test(
+          v,
+        );
+      },
+      message: "Invalid date format. Expected format: dd/mm/yyyy",
+    },
+  },
+  age: { type: Number, default: 0 }, // Age of staff
+  gender: { type: String, enum: ["male", "female"], required: true }, // Gender: male or female
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now },
 });
@@ -49,7 +58,7 @@ staffSchema.pre("validate", async function (next) {
       this.password = await bcrypt.hash(this.password, salt); // Hash the password
     }
 
-    // Generate employeeID for new staff members if not already set
+    /*     // Generate employeeID for new staff members if not already set
     if (!this.employeeID) {
       this.employeeID = await generateID("EMP", mongoose.model("Staff"));
     }
@@ -57,15 +66,15 @@ staffSchema.pre("validate", async function (next) {
     // Set the current academic session if not already set
     if (!this.session) {
       this.session = getCurrentSession();
-    }
+    } */
   }
   next();
 });
 
 // Method to dynamically update term based on start date and holiday durations
-staffSchema.methods.updateTerm = function (startDate, holidayDurations) {
-  this.term = generateCurrentTerm(startDate, holidayDurations); // Call the term generator function
-};
+// staffSchema.methods.updateTerm = function (startDate, holidayDurations) {
+//   this.term = generateCurrentTerm(startDate, holidayDurations); // Call the term generator function
+// };
 
 // Method to compare password for login authentication
 staffSchema.methods.comparePassword = async function (candidatePassword) {

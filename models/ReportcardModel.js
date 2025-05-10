@@ -45,6 +45,7 @@ const reportCardSchema = new mongoose.Schema({
   overallMarkObtainable: { type: Number }, //Total mark obtainable in the term
   overallMarkObtained: { type: Number }, //Total mark obtainable in the term
   overallPercentage: { type: Number }, //Total percentage in the term
+  position: { type: Number }, //Student's position in the class
   numberOfTimesSchoolOpened: { type: Number, default: 0 }, // Total number of times school opened in the term
   numberOfTimesPresent: { type: Number, default: 0 }, // Total number of times student was present in the term
   numberOfTimesAbsent: { type: Number, default: 0 }, // Total number of times student was absent in the term

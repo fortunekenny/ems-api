@@ -1,15 +1,15 @@
-import Attendance from "../models/AttendanceModel.js";
 import { StatusCodes } from "http-status-codes";
 import BadRequestError from "../errors/bad-request.js";
+import InternalServerError from "../errors/internal-server-error.js";
 import NotFoundError from "../errors/not-found.js";
-import {
-  getCurrentTermDetails,
-  startTermGenerationDate,
-  holidayDurationForEachTerm,
-  getCurrentSession,
-} from "../utils/termGenerator.js";
+import Attendance from "../models/AttendanceModel.js";
 import Student from "../models/StudentModel.js";
-import Class from "../models/ClassModel.js";
+import {
+  getCurrentSession,
+  getCurrentTermDetails,
+  holidayDurationForEachTerm,
+  startTermGenerationDate,
+} from "../utils/termGenerator.js";
 
 // Utility function to check if a date is a weekday
 const isWeekday = (date) => {
@@ -94,9 +94,9 @@ export const markStudentAttendanceForMorning = async (req, res, next) => {
 
     //calculate totalDaysSchoolOpened
     attendanceRecord.totalDaysSchoolOpened =
-      attendanceRecord.totalDaysPresent +
-      attendanceRecord.totalDaysAbsent -
-      attendanceRecord.totalDaysPublicHoliday;
+      attendanceRecord.totalDaysPresent + attendanceRecord.totalDaysAbsent;
+    //  -
+    // attendanceRecord.totalDaysPublicHoliday;
 
     await attendanceRecord.save();
 
@@ -106,7 +106,7 @@ export const markStudentAttendanceForMorning = async (req, res, next) => {
     });
   } catch (error) {
     console.error("Error marking morning attendance: ", error);
-    next(new BadRequestError(error.message)); // Pass error to the global error handler
+    next(new InternalServerError(error.message)); // Pass error to the global error handler
   }
 };
 
@@ -188,9 +188,9 @@ export const markStudentAttendanceForAfternoon = async (req, res, next) => {
 
     //calculate totalDaysSchoolOpened
     attendanceRecord.totalDaysSchoolOpened =
-      attendanceRecord.totalDaysPresent +
-      attendanceRecord.totalDaysAbsent -
-      attendanceRecord.totalDaysPublicHoliday;
+      attendanceRecord.totalDaysPresent + attendanceRecord.totalDaysAbsent;
+    // -
+    // attendanceRecord.totalDaysPublicHoliday;
 
     await attendanceRecord.save();
 
@@ -200,45 +200,209 @@ export const markStudentAttendanceForAfternoon = async (req, res, next) => {
     });
   } catch (error) {
     console.error("Error marking afternoon attendance: ", error);
-    next(new BadRequestError(error.message)); // Pass error to the global error handler
+    next(new InternalServerError(error.message));
   }
 };
 
 export const getAllAttendanceRecords = async (req, res, next) => {
   try {
-    const { firstName, middleName, lastName, classId, term, session, date } =
-      req.query;
+    const allowedFilters = [
+      "student",
+      "classId",
+      "classTeacher",
+      "term",
+      "session",
+      "date",
+      "sort",
+      "page",
+      "limit",
+    ];
 
-    // Build a query object based on provided filters
-    const queryObject = {};
+    const providedFilters = Object.keys(req.query);
 
-    if (firstName) {
-      queryObject["firstName"] = { $regex: firstName, $options: "i" }; // Case-insensitive search
+    // Check for unknown parameters (ignore case differences if needed)
+    const unknownFilters = providedFilters.filter(
+      (key) => !allowedFilters.includes(key),
+    );
+
+    if (unknownFilters.length > 0) {
+      // Return error if unknown parameters are present
+      throw new BadRequestError(
+        `Unknown query parameter(s): ${unknownFilters.join(", ")}`,
+      );
     }
-    if (middleName) {
-      queryObject["middleName"] = { $regex: middleName, $options: "i" }; // Case-insensitive search
+
+    const {
+      student,
+      classId,
+      classTeacher,
+      term,
+      session,
+      date,
+      sort,
+      page,
+      limit,
+    } = req.query;
+
+    // Build an initial match stage for fields stored directly on StudentAnswer
+    const matchStage = {};
+
+    if (date) matchStage.date = date;
+    if (term) matchStage.term = { $regex: term, $options: "i" };
+    if (session) matchStage.session = session;
+
+    // Start building the aggregation pipeline
+    const pipeline = [];
+    pipeline.push({ $match: matchStage });
+
+    // Lookup student data from the "students" collection
+    pipeline.push({
+      $lookup: {
+        from: "students",
+        localField: "student",
+        foreignField: "_id",
+        as: "studentData",
+      },
+    });
+    pipeline.push({ $unwind: "$studentData" });
+
+    // Lookup class data from the "classes" collection
+    pipeline.push({
+      $lookup: {
+        from: "classes",
+        localField: "classId",
+        foreignField: "_id",
+        as: "classData",
+      },
+    });
+    pipeline.push({ $unwind: "$classData" });
+
+    // Lookup to join classTeacher data from the "staff" collection
+    pipeline.push({
+      $lookup: {
+        from: "staffs", // collection name for staff (ensure this matches your DB)
+        localField: "classTeacher",
+        foreignField: "_id",
+        as: "classTeacherData",
+      },
+    });
+    pipeline.push({ $unwind: "$classTeacherData" });
+
+    const joinMatch = {};
+    if (student) {
+      const studentRegex = {
+        $regex: `^${student}$`,
+        $options: "i",
+      };
+
+      joinMatch.$or = [
+        { "studentData.firstName": studentRegex },
+        { "studentData.middleName": studentRegex },
+        { "studentData.lastName": studentRegex },
+      ];
     }
-    if (lastName) {
-      queryObject["lastName"] = { $regex: lastName, $options: "i" }; // Case-insensitive search
+    if (classTeacher) {
+      const classTeacherRegex = {
+        $regex: `^${classTeacher}$`,
+        $options: "i",
+      };
+
+      joinMatch.$or = [
+        {
+          "classTeacherData.firstName": classTeacherRegex,
+        },
+        {
+          "classTeacherData.middleName": classTeacherRegex,
+        },
+        {
+          "classTeacherData.lastName": classTeacherRegex,
+        },
+      ];
     }
     if (classId) {
-      queryObject["classId"] = classId;
+      joinMatch["classData.className"] = {
+        $regex: `^${classId}$`,
+        $options: "i",
+      };
     }
-    if (date) {
-      queryObject["date"] = date;
-    }
-    if (term) {
-      queryObject["term"] = term;
-    }
-    if (session) {
-      queryObject["session"] = session;
+    if (Object.keys(joinMatch).length > 0) {
+      pipeline.push({ $match: joinMatch });
     }
 
-    const attendanceRecords = await Attendance.find(queryObject);
-    res.status(StatusCodes.OK).json({ attendance: attendanceRecords });
+    // Sorting stage: define sort options.
+    // Adjust the sort options to suit your requirements.
+    const sortOptions = {
+      newest: { createdAt: -1 },
+      oldest: { createdAt: 1 },
+      "a-z": { "studentData.firstName": 1 },
+      "z-a": { "studentData.firstName": -1 },
+    };
+    const sortKey = sortOptions[sort] || sortOptions.newest;
+    pipeline.push({ $sort: sortKey });
+
+    // Pagination stages: Calculate skip and limit.
+    const pageNumber = Number(page) || 1;
+    const limitNumber = Number(limit) || 10;
+    pipeline.push({ $skip: (pageNumber - 1) * limitNumber });
+    pipeline.push({ $limit: limitNumber });
+
+    // Projection stage: structure the output.
+    pipeline.push({
+      $project: {
+        _id: 1,
+        date: 1,
+        term: 1,
+        session: 1,
+        createdAt: 1,
+        student: {
+          _id: "$studentData._id",
+          firstName: "$studentData.firstName",
+          middleName: "$studentData.middleName",
+          lastName: "$studentData.lastName",
+        },
+        classTeacher: {
+          _id: "$classTeacherData._id",
+          firstName: "$classTeacherData.firstName",
+          middleName: "$classTeacherData.middleName",
+          lastName: "$classTeacherData.lastName",
+        },
+        classId: {
+          _id: "$classData._id",
+          className: "$classData.className",
+        },
+        // Include other fields from Attendance if needed.
+      },
+    });
+
+    // Execute the aggregation pipeline
+    const attendances = await Attendance.aggregate(pipeline);
+
+    // Count total matching documents for pagination.
+    // We use a similar pipeline without $skip, $limit, $sort, and $project.
+    const countPipeline = pipeline.filter(
+      (stage) =>
+        !(
+          "$skip" in stage ||
+          "$limit" in stage ||
+          "$sort" in stage ||
+          "$project" in stage
+        ),
+    );
+
+    countPipeline.push({ $count: "total" });
+    const countResult = await Attendance.aggregate(countPipeline);
+    const totalAttendances = countResult[0] ? countResult[0].total : 0;
+    const numOfPages = Math.ceil(totalAttendances / limitNumber);
+
+    res.status(StatusCodes.OK).json({
+      count: totalAttendances,
+      numOfPages,
+      currentPage: pageNumber,
+      attendances,
+    });
   } catch (error) {
     console.error("Error getting attendance records: ", error);
-    next(new BadRequestError(error.message));
+    next(new InternalServerError(error.message));
   }
 };
 
@@ -257,7 +421,7 @@ export const getAttendanceById = async (req, res, next) => {
       ]);
   } catch (error) {
     console.error("Error getting attendance record: ", error);
-    next(new BadRequestError(error.message));
+    next(new InternalServerError(error.message));
   }
 };
 
@@ -294,6 +458,6 @@ export const deleteStudentAttendanceForTerm = async (req, res) => {
       message: `Deleted ${deleteResult.deletedCount} attendance records for student ID: ${studentId} in the current term and session.`,
     });
   } catch (error) {
-    res.status(StatusCodes.BAD_REQUEST).json({ error: error.message });
+    next(new InternalServerError(error.message));
   }
 };

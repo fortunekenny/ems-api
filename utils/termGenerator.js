@@ -284,6 +284,10 @@ export const getCurrentTermDetails = (startDate, holidayDurations) => {
   };
 };
 
+/* console.log("termEndDate:", endDate);
+console.log(term);
+console.log(session); */
+
 /*export const getCurrentTermDetails = (startDate, holidayDurations) => {
   if (holidayDurations.length < 3) {
     throw new Error("Holiday durations must be provided for all three terms.");

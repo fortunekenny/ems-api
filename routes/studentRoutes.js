@@ -40,6 +40,31 @@ router.patch(
   studentController.updateStudentStatus,
 );
 
+// Route to update student isVerified (Admin Only)
+router.patch(
+  "/student/:studentId/verification",
+  authenticateToken,
+  authorizeRole("admin", "proprietor"),
+  checkStatus,
+  studentController.updateStudentVerification,
+);
+
+router.patch(
+  "/student/:studentId/addStudentToAParent",
+  authenticateToken,
+  authorizeRole("admin", "proprietor"),
+  checkStatus,
+  studentController.addStudentToParent,
+);
+
+router.patch(
+  "/student/:studentId/removeStudentFromAParent",
+  authenticateToken,
+  authorizeRole("admin", "proprietor"),
+  checkStatus,
+  studentController.removeStudentFromParent,
+);
+
 router.delete(
   "/:id",
   authenticateToken,

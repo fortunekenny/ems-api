@@ -6,6 +6,7 @@ import Subject from "../models/SubjectModel.js";
 import Attendance from "../models/AttendanceModel.js";
 import { StatusCodes } from "http-status-codes";
 import BadRequestError from "../errors/bad-request.js";
+import NotFoundError from "../errors/not-found.js";
 import Forbidden from "../errors/forbidden.js";
 import createTokenUser from "../utils/createTokenUser.js";
 import { attachCookiesToResponse } from "../utils/jwt.js";
@@ -15,6 +16,7 @@ import {
   startTermGenerationDate,
   holidayDurationForEachTerm,
 } from "../utils/termGenerator.js";
+import InternalServerError from "../errors/internal-server-error.js";
 
 // Utility to generate a list of school days in a term (excluding weekends)
 const getSchoolDays = (startDate, endDate) => {
@@ -41,20 +43,21 @@ export const registerStudent = async (req, res, next) => {
     houseNumber,
     streetName,
     townOrCity,
+    phoneNumber,
     password,
     classId,
+    dateOfBirth,
     age,
     gender,
-    guardian,
   } = req.body;
 
-  // Validate required fields
   if (
     !firstName ||
     !middleName ||
     !lastName ||
     !streetName ||
     !townOrCity ||
+    !dateOfBirth ||
     !age ||
     !gender ||
     !classId
@@ -65,55 +68,42 @@ export const registerStudent = async (req, res, next) => {
   const { role, userId } = req.user;
 
   try {
-    // Role validation: Only parent or admin can register a student
     if (role !== "parent" && role !== "admin" && role !== "proprietor") {
       throw new Forbidden("Only parents can register students.");
     }
 
     let parent = null;
-    let guardianId = null;
+    let parentGuardianId = null;
+    let assignedGuardian = null;
 
     if (role === "parent") {
       parent = await Parent.findById(userId);
-      if (!parent) {
-        return res
-          .status(StatusCodes.NOT_FOUND)
-          .json({ error: "Parent not found" });
-      }
-      guardianId = parent._id;
+      if (!parent) throw new NotFoundError("Parent not found");
+      parentGuardianId = parent._id;
     }
 
-    if (role === "admin" || role !== "proprietor") {
-      if (!guardian) {
+    if (role === "admin" || role === "proprietor") {
+      if (!req.body.parentGuardianId) {
         throw new BadRequestError(
-          "Admin must assign a guardian (parent) for the student.",
+          "Admin must assign a parent for the student.",
         );
       }
 
-      const assignedGuardian = await Parent.findById(guardian);
+      assignedGuardian = await Parent.findById(req.body.parentGuardianId);
       if (!assignedGuardian) {
-        return res
-          .status(StatusCodes.NOT_FOUND)
-          .json({ error: "Assigned guardian (parent) not found." });
+        throw new NotFoundError("Assigned parent/guardian not found.");
       }
-      guardianId = assignedGuardian._id;
+      parentGuardianId = assignedGuardian._id;
     }
 
-    // Generate current term details using start date and holiday durations
     const { term, session, startDate, endDate } = getCurrentTermDetails(
       startTermGenerationDate,
       holidayDurationForEachTerm,
     );
 
-    console.log(
-      "studentId",
-      await generateID("STU", firstName, middleName, lastName),
-    );
-
     await Student.collection.dropIndex("email_1");
     await Student.createIndexes();
 
-    // Create and save the new student
     const student = new Student({
       firstName,
       middleName,
@@ -121,12 +111,13 @@ export const registerStudent = async (req, res, next) => {
       houseNumber,
       streetName,
       townOrCity,
+      dateOfBirth,
+      phoneNumber,
       studentID: await generateID("STU", firstName, middleName, lastName),
-      // email: req.body.email || undefined,
       email: req.body.email == null ? undefined : req.body.email,
       password,
       classId,
-      guardian: guardianId,
+      parentGuardianId,
       age,
       gender,
       term,
@@ -138,7 +129,7 @@ export const registerStudent = async (req, res, next) => {
     // Verify class exists and add student
     const assignedClass = await Class.findById(classId);
     if (!assignedClass) {
-      throw new BadRequestError(`Class with id ${classId} not found`);
+      throw new NotFoundError(`Class not found`);
     }
     if (
       assignedClass.term === term &&
@@ -163,16 +154,22 @@ export const registerStudent = async (req, res, next) => {
     }
 
     // Update parent's children
-    if (role === "parent") {
-      parent.children.push(student._id);
-      await parent.save();
+    const targetParent = role === "parent" ? parent : assignedGuardian;
+
+    if (targetParent.father && Object.keys(targetParent.father).length > 0) {
+      targetParent.father.children.push(student._id);
+    }
+    if (targetParent.mother && Object.keys(targetParent.mother).length > 0) {
+      targetParent.mother.children.push(student._id);
+    }
+    if (
+      targetParent.singleParent &&
+      Object.keys(targetParent.singleParent).length > 0
+    ) {
+      targetParent.singleParent.children.push(student._id);
     }
 
-    if (role === "admin") {
-      const assignedParent = await Parent.findById(guardian);
-      assignedParent.children.push(student._id);
-      await assignedParent.save();
-    }
+    await targetParent.save();
 
     // Generate school days and attendance records
     const schoolDays = getSchoolDays(new Date(startDate), new Date(endDate));
@@ -223,11 +220,10 @@ export const registerStudent = async (req, res, next) => {
   } catch (error) {
     if (error.code === 11000) {
       console.error("Error registering student:", error);
-      throw new BadRequestError("There is a dublicate error of unique values.");
+      throw new BadRequestError("There is a duplicate error of unique values.");
     }
-
     console.error("Error registering student:", error);
-    next(new BadRequestError(error.message));
+    next(new InternalServerError(error.message));
 
     // throw error;
   }

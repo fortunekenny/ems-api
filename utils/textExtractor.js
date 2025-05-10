@@ -7,8 +7,8 @@ import axios from "axios";
 // const pdfParse = require("pdf-parse");
 import * as pdfjsLib from "pdfjs-dist";
 
-import * as tf from "@tensorflow/tfjs";
-import use from "@tensorflow-models/universal-sentence-encoder";
+/* import * as tf from "@tensorflow/tfjs";
+import use from "@tensorflow-models/universal-sentence-encoder"; */
 import { pipeline } from "@huggingface/transformers";
 // import { use } from "@tensorflow-models/universal-sentence-encoder"; // For TensorFlow.js
 // import tf from "@tensorflow/tfjs-node"; // TensorFlow backend
@@ -63,42 +63,280 @@ export const extractTextFromFile = async (file) => {
   }
 };
 
-// Load the Universal Sentence Encoder model
-const model = await use.load();
+import * as tf from "@tensorflow/tfjs";
+import use from "@tensorflow-models/universal-sentence-encoder";
 
-/*export const calculateSemanticSimilarity = async (text1, text2) => {
-  console.log("Inputs to calculateSemanticSimilarity:", { text1, text2 });
+// A variable to hold the loaded model
+let model;
+
+// Load the Universal Sentence Encoder model asynchronously on module initialization
+const loadModel = async () => {
+  let retries = 3; // Number of retries
+  while (retries > 0) {
+    try {
+      // Increase the fetch timeout
+      tf.util.fetch = (url, options) => {
+        return fetch(url, { ...options, timeout: 30000 }); // 30 seconds timeout
+      };
+
+      model = await use.load();
+      console.log("Universal Sentence Encoder model loaded successfully!");
+      return; // Exit on success
+    } catch (error) {
+      console.error(
+        `Error loading the model (${retries} retries left):`,
+        error,
+      );
+      retries--;
+      if (retries === 0) {
+        throw new Error("Failed to load the model after multiple retries.");
+      }
+    }
+  }
+};
+
+// Call the load function immediately
+loadModel().catch((error) => {
+  console.error("Failed to load the model:", error);
+});
+
+// Helper function to normalize a vector
+const normalizeVector = (vec) => {
+  const magnitude = Math.sqrt(vec.reduce((sum, val) => sum + val ** 2, 0));
+  return vec.map((val) => val / magnitude);
+};
+
+// Helper function to calculate cosine similarity between two vectors
+const calculateCosineSimilarity = (vec1, vec2) => {
+  const dotProduct = vec1.reduce((sum, v, i) => sum + v * vec2[i], 0);
+  const magnitude1 = Math.sqrt(vec1.reduce((sum, v) => sum + v * v, 0));
+  const magnitude2 = Math.sqrt(vec2.reduce((sum, v) => sum + v * v, 0));
+  return dotProduct / (magnitude1 * magnitude2);
+};
+
+// Exported function to calculate semantic similarity
+export const calculateSemanticSimilarity = async (text1, text2) => {
+  // Validate inputs
+  if (!text1 || !text2) {
+    console.error("Invalid inputs for similarity calculation:", {
+      text1,
+      text2,
+    });
+    return 0; // Default similarity if inputs are invalid
+  }
 
   try {
-    if (!text1 || !text2) {
-      // console.error("Invalid inputs for similarity calculation:", {
-      //   text1,
-      //   text2,
-      // });
-      return 0; // Default to 0 similarity if inputs are invalid
+    // Ensure the model is loaded before using it
+    if (!model) {
+      // Optionally, wait until the model is loaded
+      await loadModel();
+      if (!model) {
+        throw new Error("Model not loaded");
+      }
     }
 
+    // Generate embeddings for both texts
     const embeddings1 = await model.embed([text1]);
     const embeddings2 = await model.embed([text2]);
 
-    const embeddings1Array = embeddings1.arraySync()[0]; // Convert to array
+    // Convert the output tensors to JavaScript arrays
+    const embeddings1Array = embeddings1.arraySync()[0];
     const embeddings2Array = embeddings2.arraySync()[0];
 
-    // Log the embeddings for debugging
-    // console.log("Embeddings arrays:", { embeddings1Array, embeddings2Array });
+    // Normalize the vectors
+    const embeddings1Normalized = normalizeVector(embeddings1Array);
+    const embeddings2Normalized = normalizeVector(embeddings2Array);
 
+    // Calculate cosine similarity between the two normalized embeddings
     const similarity = calculateCosineSimilarity(
-      embeddings1Array,
-      embeddings2Array,
+      embeddings1Normalized,
+      embeddings2Normalized,
     );
-    // console.log("Calculated similarity:", similarity);
+
+    console.log("Calculated similarity:", text1, text2, similarity);
+    return similarity;
+  } catch (err) {
+    console.error("Error in calculateSemanticSimilarity:", err);
+    return 0; // Return 0 similarity in case of error
+  }
+};
+
+/* const calculateSemanticSimilarity2 = async (text1, text2) => {
+  // Validate inputs
+  if (!text1 || !text2) {
+    console.error("Invalid inputs for similarity calculation:", {
+      text1,
+      text2,
+    });
+    return 0; // Default similarity if inputs are invalid
+  }
+
+  try {
+    // Ensure the model is loaded before using it
+    if (!model) {
+      // Optionally, wait until the model is loaded
+      await loadModel();
+      if (!model) {
+        throw new Error("Model not loaded");
+      }
+    }
+
+    // Generate embeddings for both texts
+    const embeddings1 = await model.embed([text1]);
+    const embeddings2 = await model.embed([text2]);
+
+    // Convert the output tensors to JavaScript arrays
+    const embeddings1Array = embeddings1.arraySync()[0];
+    const embeddings2Array = embeddings2.arraySync()[0];
+
+    // Normalize the vectors
+    const embeddings1Normalized = normalizeVector(embeddings1Array);
+    const embeddings2Normalized = normalizeVector(embeddings2Array);
+
+    // Calculate cosine similarity between the two normalized embeddings
+    const similarity = calculateCosineSimilarity(
+      embeddings1Normalized,
+      embeddings2Normalized,
+    );
+
+    console.log("Calculated similarity:", text1, text2, similarity);
+    return similarity;
+  } catch (err) {
+    console.error("Error in calculateSemanticSimilarity:", err);
+    return 0; // Return 0 similarity in case of error
+  }
+}; */
+
+/*
+// Optionally, explicitly set the backend to "tensorflow"
+tf.setBackend("tensorflow");
+
+// A variable to hold the loaded model
+let model;
+
+// Load the Universal Sentence Encoder model asynchronously on module initialization
+const loadModel = async () => {
+  try {
+    model = await use.load();
+    console.log("Universal Sentence Encoder model loaded successfully!");
+  } catch (error) {
+    console.error("Error loading the model:", error);
+  }
+};
+
+// Call the load function immediately
+loadModel();
+
+// Helper function to normalize a vector
+const normalizeVector = (vec) => {
+  const magnitude = Math.sqrt(vec.reduce((sum, val) => sum + val ** 2, 0));
+  return vec.map((val) => val / magnitude);
+};
+
+// Helper function to calculate cosine similarity between two vectors
+const calculateCosineSimilarity = (vec1, vec2) => {
+  const dotProduct = vec1.reduce((sum, v, i) => sum + v * vec2[i], 0);
+  const magnitude1 = Math.sqrt(vec1.reduce((sum, v) => sum + v * v, 0));
+  const magnitude2 = Math.sqrt(vec2.reduce((sum, v) => sum + v * v, 0));
+  return dotProduct / (magnitude1 * magnitude2);
+};
+
+// Exported function to calculate semantic similarity
+export const calculateSemanticSimilarity = async (text1, text2) => {
+  // Validate inputs
+  if (!text1 || !text2) {
+    console.error("Invalid inputs for similarity calculation:", {
+      text1,
+      text2,
+    });
+    return 0; // Default similarity if inputs are invalid
+  }
+
+  try {
+    // Ensure the model is loaded before using it
+    if (!model) {
+      // Optionally, wait until the model is loaded
+      await loadModel();
+      if (!model) {
+        throw new Error("Model not loaded");
+      }
+    }
+
+    // Generate embeddings for both texts
+    const embeddings1 = await model.embed([text1]);
+    const embeddings2 = await model.embed([text2]);
+
+    // Convert the output tensors to JavaScript arrays
+    const embeddings1Array = embeddings1.arraySync()[0];
+    const embeddings2Array = embeddings2.arraySync()[0];
+
+    // Normalize the vectors
+    const embeddings1Normalized = normalizeVector(embeddings1Array);
+    const embeddings2Normalized = normalizeVector(embeddings2Array);
+
+    // Calculate cosine similarity between the two normalized embeddings
+    const similarity = calculateCosineSimilarity(
+      embeddings1Normalized,
+      embeddings2Normalized,
+    );
 
     return similarity;
   } catch (err) {
     console.error("Error in calculateSemanticSimilarity:", err);
-    return 0; // Default to 0 in case of errors
+    return 0; // Return 0 similarity in case of error
+  }
+};
+
+const calculateSemanticSimilarity2 = async (text1, text2) => {
+  // Validate inputs
+  if (!text1 || !text2) {
+    console.error("Invalid inputs for similarity calculation:", {
+      text1,
+      text2,
+    });
+    return 0; // Default similarity if inputs are invalid
+  }
+
+  try {
+    // Ensure the model is loaded before using it
+    if (!model) {
+      // Optionally, wait until the model is loaded
+      await loadModel();
+      if (!model) {
+        throw new Error("Model not loaded");
+      }
+    }
+
+    // Generate embeddings for both texts
+    const embeddings1 = await model.embed([text1]);
+    const embeddings2 = await model.embed([text2]);
+
+    // Convert the output tensors to JavaScript arrays
+    const embeddings1Array = embeddings1.arraySync()[0];
+    const embeddings2Array = embeddings2.arraySync()[0];
+
+    // Normalize the vectors
+    const embeddings1Normalized = normalizeVector(embeddings1Array);
+    const embeddings2Normalized = normalizeVector(embeddings2Array);
+
+    // Calculate cosine similarity between the two normalized embeddings
+    const similarity = calculateCosineSimilarity(
+      embeddings1Normalized,
+      embeddings2Normalized,
+    );
+
+    console.log("Calculated similarity:", text1, text2, similarity);
+    return similarity;
+  } catch (err) {
+    console.error("Error in calculateSemanticSimilarity:", err);
+    return 0; // Return 0 similarity in case of error
   }
 };*/
+
+/* 
+// Load the Universal Sentence Encoder model
+const model = await use.load();
+
 
 export const calculateSemanticSimilarity = async (text1, text2) => {
   // console.log("Inputs to calculateSemanticSimilarity:", { text1, text2 });
@@ -154,13 +392,48 @@ const normalizeVector = (vec) => {
   const magnitude = Math.sqrt(vec.reduce((sum, val) => sum + val ** 2, 0));
   return vec.map((val) => val / magnitude);
 };
+ */
 
-/*calculateSemanticSimilarity2("sofia", "sofai"); //Calculated similarity: sofia sofai 0.5743433937760358
+/*export const calculateSemanticSimilarity = async (text1, text2) => {
+  console.log("Inputs to calculateSemanticSimilarity:", { text1, text2 });
+
+  try {
+    if (!text1 || !text2) {
+      // console.error("Invalid inputs for similarity calculation:", {
+      //   text1,
+      //   text2,
+      // });
+      return 0; // Default to 0 similarity if inputs are invalid
+    }
+
+    const embeddings1 = await model.embed([text1]);
+    const embeddings2 = await model.embed([text2]);
+
+    const embeddings1Array = embeddings1.arraySync()[0]; // Convert to array
+    const embeddings2Array = embeddings2.arraySync()[0];
+
+    // Log the embeddings for debugging
+    // console.log("Embeddings arrays:", { embeddings1Array, embeddings2Array });
+
+    const similarity = calculateCosineSimilarity(
+      embeddings1Array,
+      embeddings2Array,
+    );
+    // console.log("Calculated similarity:", similarity);
+
+    return similarity;
+  } catch (err) {
+    console.error("Error in calculateSemanticSimilarity:", err);
+    return 0; // Default to 0 in case of errors
+  }
+};*/
+
+/* calculateSemanticSimilarity2("sofia", "sofai"); //Calculated similarity: sofia sofai 0.5743433937760358
 calculateSemanticSimilarity2("cat", "table"); //Calculated similarity: cat table 0.4252069558047871
 calculateSemanticSimilarity2("dog", "puppy"); //Calculated similarity: dog puppy 0.7674349862105809
 calculateSemanticSimilarity2("collective noun", "collection noun"); //Calculated similarity: collective noun collection noun 0.7293500188435394
 calculateSemanticSimilarity2("sun", "sun"); //Calculated similarity: sun sun 1.0000000000000002
-calculateSemanticSimilarity2("sun", "son"); //Calculated similarity: sun son 0.32500026238711566*/
+calculateSemanticSimilarity2("sun", "son"); //Calculated similarity: sun son 0.32500026238711566 */
 
 // Completely dissimilar strings: "cat" vs. "table".
 // Identical strings: "sofia" vs. "sofia".

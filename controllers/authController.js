@@ -9,21 +9,20 @@ import Student from "../models/StudentModel.js";
 import Staff from "../models/StaffModel.js";
 
 export const login = async (req, res) => {
-  const { email, password, studentID, staffId } = req.body;
+  const { email, password, studentID, staffId, phone } = req.body;
 
   // Check if required fields are provided
-  if (!password || (!email && !studentID && !staffId)) {
-    throw new BadRequestError(
-      "Please provide email or studentID or staffId, along with password.",
-    );
+  if (!password || (!email && !studentID && !staffId && !phone)) {
+    throw new BadRequestError("Please provide required fields.");
   }
 
   try {
     let user;
 
     // Check if Parent is logging in (only email allowed)
-    if (email) {
-      user = await Parent.findOne({ email });
+    if (email || phone) {
+      const parentQuery = email ? { email } : { phone };
+      user = await Parent.findOne({ parentQuery });
       if (user && (await bcrypt.compare(password, user.password))) {
         const tokenUser = createTokenUser(user); // Assuming Parent has name, email
         attachCookiesToResponse({ res, user: tokenUser });

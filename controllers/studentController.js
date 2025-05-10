@@ -1,59 +1,198 @@
-import Student from "../models/StudentModel.js";
-import Class from "../models/ClassModel.js";
-import Subject from "../models/SubjectModel.js";
-import Parent from "../models/ParentModel.js";
-import NotFoundError from "../errors/not-found.js";
 import { StatusCodes } from "http-status-codes";
-import checkPermissions from "../utils/checkPermissions.js";
+import NotFoundError from "../errors/not-found.js";
 import Attendance from "../models/AttendanceModel.js";
+import Class from "../models/ClassModel.js";
+import Parent from "../models/ParentModel.js";
+import Student from "../models/StudentModel.js";
+import Subject from "../models/SubjectModel.js";
+import checkPermissions from "../utils/checkPermissions.js";
+import calculateAge from "../utils/ageCalculate.js";
+import BadRequestError from "../errors/bad-request.js";
+import UnauthorizedError from "../errors/unauthorize.js";
+import InternalServerError from "../errors/internal-server-error.js";
 
 // Get all students
-export const getStudents = async (req, res) => {
+export const getStudents = async (req, res, next) => {
   try {
-    const { firstName, middleName, lastName, classId, term, session } =
+    // Define allowed query parameters
+    const allowedFilters = [
+      "student", // combined filter for firstName, middleName, lastName, studentId
+      "classId",
+      "status",
+      "term",
+      "session",
+      "sort",
+      "page",
+      "limit",
+    ];
+
+    // Get provided query keys
+    const providedFilters = Object.keys(req.query);
+
+    // Check for unknown parameters (ignore case differences if needed)
+    const unknownFilters = providedFilters.filter(
+      (key) => !allowedFilters.includes(key),
+    );
+
+    if (unknownFilters.length > 0) {
+      // Return error if unknown parameters are present
+      throw new BadRequestError(
+        `Unknown query parameter(s): ${unknownFilters.join(", ")}`,
+      );
+    }
+
+    const { student, classId, status, term, session, sort, page, limit } =
       req.query;
 
-    // Build a query object based on provided filters
-    const queryObject = {};
+    // Build an initial match stage for fields stored directly on Assignment
+    const matchStage = {};
 
-    if (firstName) {
-      queryObject["firstName"] = { $regex: firstName, $options: "i" }; // Case-insensitive search
+    if (term) matchStage.term = { $regex: term, $options: "i" };
+    if (session) matchStage.session = session;
+    if (status) matchStage.status = status;
+
+    // Here we use $or on firstName, middleName, lastName, and employeeId if the 'student' parameter is provided.
+    if (student) {
+      matchStage.$or = [
+        { firstName: { $regex: student, $options: "i" } },
+        { middleName: { $regex: student, $options: "i" } },
+        { lastName: { $regex: student, $options: "i" } },
+        { employeeId: { $regex: student, $options: "i" } },
+      ];
     }
-    if (middleName) {
-      queryObject["middleName"] = { $regex: middleName, $options: "i" }; // Case-insensitive search
-    }
-    if (lastName) {
-      queryObject["lastName"] = { $regex: lastName, $options: "i" }; // Case-insensitive search
-    }
+
+    const pipeline = [];
+    pipeline.push({ $match: matchStage });
+
+    // Lookup to join class data from the "classes" collection
+    pipeline.push({
+      $lookup: {
+        from: "classes",
+        localField: "classId",
+        foreignField: "_id",
+        as: "classData",
+      },
+    });
+    pipeline.push({ $unwind: "$classData" });
+
+    // Build additional matching criteria based on joined fields.
+    const joinMatch = {};
+
     if (classId) {
-      queryObject["classId"] = classId;
-    }
-    if (term) {
-      queryObject["term"] = term;
-    }
-    if (session) {
-      queryObject["session"] = session;
+      joinMatch["classData.className"] = {
+        $regex: `^${classId}$`,
+        $options: "i",
+      };
     }
 
-    const students = await Student.find(queryObject)
-      .select("-password")
-      .populate([
-        {
-          path: "classId",
-          select: "_id className classTeacher subjectTeachers subjects",
-          populate: [
-            { path: "classTeacher", select: "_id name" },
-            { path: "subjectTeachers", select: "_id name" },
-            { path: "subjects", select: "_id subjectName" },
-          ],
+    if (Object.keys(joinMatch).length > 0) {
+      pipeline.push({ $match: joinMatch });
+    }
+
+    // Sorting stage: define sort options.
+    // Adjust the sort options to suit your requirements.
+    const sortOptions = {
+      newest: { createdAt: -1 },
+      oldest: { createdAt: 1 },
+      "a-z": { firstName: 1 },
+      "z-a": { firstName: -1 },
+    };
+    const sortKey = sortOptions[sort] || sortOptions.newest;
+    pipeline.push({ $sort: sortKey });
+
+    // Pagination stages: Calculate skip and limit.
+    const pageNumber = Number(page) || 1;
+    const limitNumber = Number(limit) || 10;
+    pipeline.push({ $skip: (pageNumber - 1) * limitNumber });
+    pipeline.push({ $limit: limitNumber });
+
+    // Projection stage: structure the output.
+    pipeline.push({
+      $project: {
+        _id: 1,
+        firstName: 1,
+        middleName: 1,
+        lastName: 1,
+        classData: {
+          _id: "$classData._id",
+          className: "$classData.className",
         },
-        { path: "guardian", select: "_id name" },
-      ]);
-    res.status(StatusCodes.OK).json({ count: students.length, students });
+        studentId: 1,
+        status: 1,
+        term: 1,
+        session: 1,
+        // Include other fields from student if needed.
+      },
+    });
+
+    // Execute the aggregation pipeline
+    const students = await Student.aggregate(pipeline);
+
+    // Count total matching documents for pagination.
+    // We use a similar pipeline without $skip, $limit, $sort, and $project.
+    const countPipeline = pipeline.filter(
+      (stage) =>
+        !(
+          "$skip" in stage ||
+          "$limit" in stage ||
+          "$sort" in stage ||
+          "$project" in stage
+        ),
+    );
+    countPipeline.push({ $count: "total" });
+    const countResult = await Student.aggregate(countPipeline);
+    const totalStudents = countResult[0] ? countResult[0].total : 0;
+    const numOfPages = Math.ceil(totalStudents / limitNumber);
+
+    res.status(StatusCodes.OK).json({
+      count: totalStudents,
+      numOfPages,
+      currentPage: pageNumber,
+      students,
+    });
   } catch (error) {
-    res
-      .status(StatusCodes.INTERNAL_SERVER_ERROR)
-      .json({ message: error.message });
+    console.error("Error getting all students:", error);
+    next(new InternalServerError(error.message));
+  }
+};
+
+export const updateStudentVerification = async (req, res, next) => {
+  try {
+    const { studentId } = req.params;
+    const { isVerified } = req.body;
+    const { role } = req.user;
+
+    // Only admin or proprietor allowed
+    if (role !== "admin" && role !== "proprietor") {
+      throw new UnauthorizedError(
+        "Only admin or proprietor can update student verification status",
+      );
+    }
+
+    if (typeof isVerified !== "boolean") {
+      throw new BadRequestError("isVerified must be a boolean");
+    }
+
+    const student = await Student.findById(studentId);
+    if (!student) {
+      throw new NotFoundError(`Student not found`);
+    }
+
+    if (student.isVerified === isVerified) {
+      throw new BadRequestError(
+        `Student verification status is already '${isVerified}'`,
+      );
+    }
+
+    student.isVerified = isVerified;
+    await student.save();
+
+    res.status(StatusCodes.OK).json({
+      message: `Student verification status updated to '${isVerified}'`,
+    });
+  } catch (error) {
+    console.error("Error updating student verification:", error);
+    next(new InternalServerError(error.message));
   }
 };
 
@@ -61,7 +200,7 @@ export const getStudents = async (req, res) => {
 export const getStudentById = async (req, res) => {
   try {
     const { id: studentId } = req.params;
-    // const student = await Student.findOne({ _id: studentId }).populate('class, guardian')
+    // const student = await Student.findOne({ _id: studentId }).populate('class, parentGuardianId')
     const student = await Student.findOne({ _id: studentId })
       .select("-password")
       .populate([
@@ -69,12 +208,12 @@ export const getStudentById = async (req, res) => {
           path: "classId",
           select: "_id className classTeacher subjectTeachers subjects",
           populate: [
-            { path: "classTeacher", select: "_id name" },
-            { path: "subjectTeachers", select: "_id name" },
+            { path: "classTeacher", select: "_id firstName lastName" },
+            { path: "subjectTeachers", select: "_id firstName lastName" },
             { path: "subjects", select: "_id subjectName" },
           ],
         },
-        { path: "guardian", select: "_id name" },
+        { path: "parentGuardianId", select: "_id name firstName lastName" },
       ]);
 
     if (!student) {
@@ -92,9 +231,25 @@ export const getStudentById = async (req, res) => {
 };
 
 // Update student details
-export const updateStudent = async (req, res) => {
+export const updateStudent = async (req, res, next) => {
   const { id: studentId } = req.params;
-  const { name, email, classId, age, gender, address, guardianId } = req.body; // Fields to update
+  const {
+    firstName,
+    middleName,
+    lastName,
+    houseNumber,
+    streetName,
+    townOrCity,
+    dateOfBirth,
+    age,
+    gender,
+    email,
+    role,
+    term,
+    session,
+    parentGuardianId,
+    classId,
+  } = req.body; // Fields to update
 
   try {
     // Find the student by ID
@@ -102,12 +257,6 @@ export const updateStudent = async (req, res) => {
     if (!student) {
       throw new NotFoundError(`No student found with id: ${studentId}`);
     }
-
-    // Generate current term and session
-    const term = generateCurrentTerm(
-      startTermGenerationDate,
-      holidayDurationForEachTerm,
-    );
 
     // Check for duplicate email
     if (email && email !== student.email) {
@@ -119,21 +268,26 @@ export const updateStudent = async (req, res) => {
 
     checkPermissions(req.user, student.user);
 
-    // Step 1: Remove student from previous guardian (if guardian changes)
-    if (guardianId && guardianId !== student.guardian.toString()) {
-      const previousGuardian = await Parent.findById(student.guardian);
+    // Step 1: Remove student from previous parentGuardianId (if parentGuardianId changes)
+    if (
+      parentGuardianId &&
+      parentGuardianId !== student.parentGuardianId.toString()
+    ) {
+      const previousGuardian = await Parent.findById(student.parentGuardianId);
       if (previousGuardian) {
-        // Remove student from the previous guardian's children array
+        // Remove student from the previous parentGuardianId's children array
         previousGuardian.children.pull(student._id);
         await previousGuardian.save();
       }
 
-      const newGuardian = await Parent.findById(guardianId);
+      const newGuardian = await Parent.findById(parentGuardianId);
       if (!newGuardian) {
-        throw new NotFoundError(`Guardian with id ${guardianId} not found`);
+        throw new NotFoundError(
+          `Guardian with id ${parentGuardianId} not found`,
+        );
       }
-      student.guardian = guardianId; // Update the student's guardian
-      newGuardian.children.push(student._id); // Add the student to the new guardian
+      student.parentGuardianId = parentGuardianId; // Update the student's parentGuardianId
+      newGuardian.children.push(student._id); // Add the student to the new parentGuardianId
       await newGuardian.save();
     }
 
@@ -177,45 +331,68 @@ export const updateStudent = async (req, res) => {
       }
     }
 
-    // Step 4: Update student fields (name, email, age, gender, address)
-    student.name = name || student.name;
-    student.email = email || student.email;
-    student.age = age || student.age;
-    student.gender = gender || student.gender;
-    student.address = address || student.address;
+    age = calculateAge(dateOfBirth);
+    if (email) student.email = email;
+    if (role) student.role = role;
+    if (firstName) student.firstName = firstName;
+    if (middleName) student.middleName = middleName;
+    if (lastName) student.lastName = lastName;
+    if (houseNumber) student.houseNumber = houseNumber;
+    if (streetName) student.streetName = streetName;
+    if (townOrCity) student.townOrCity = townOrCity;
+    if (dateOfBirth) student.dateOfBirth = dateOfBirth;
+    if (gender) student.gender = gender;
+    if (term) student.term = term;
+    if (session) student.session = session;
+    if (parentGuardianId) student.parentGuardianId = parentGuardianId;
+    if (classId) student.classId = classId;
 
     // Save the updated student record
     await student.save();
 
+    const updatedPopulatedStudent = await Student.findById(student._id)
+      .select("-password")
+      .populate([
+        {
+          path: "classId",
+          select: "_id className classTeacher subjectTeachers subjects",
+          populate: [
+            { path: "classTeacher", select: "_id firstName lastName" },
+            { path: "subjectTeachers", select: "_id firstName lastName" },
+            { path: "subjects", select: "_id subjectName" },
+          ],
+        },
+        { path: "parentGuardianId", select: "_id name firstName lastName" },
+      ]);
+
     res.status(StatusCodes.OK).json({
       message: "Student updated successfully",
-      student,
+      updatedPopulatedStudent,
     });
   } catch (error) {
-    res
-      .status(StatusCodes.INTERNAL_SERVER_ERROR)
-      .json({ message: error.message });
+    console.error("Error updating student:", error);
+    next(new BadRequestError(error.message));
   }
 };
 
 // Update student status
-export const updateStudentStatus = async (req, res) => {
+export const updateStudentStatus = async (req, res, next) => {
   try {
     const { id: studentId } = req.params;
     const { status } = req.body; // Status to update (active or inactive)
 
     // Ensure status is valid
     if (!["active", "inactive"].includes(status)) {
-      return res.status(StatusCodes.BAD_REQUEST).json({
-        message: "Invalid status. Allowed values are 'active' or 'inactive'.",
-      });
+      throw new BadRequestError(
+        "Invalid status. Allowed values are 'active' or 'inactive'.",
+      );
     }
 
     // Find the student
     const student = await Student.findById(studentId);
 
     if (!student) {
-      throw new NotFoundError(`No student found with id: ${studentId}`);
+      throw new NotFoundError(`Student not found`);
     }
 
     // Update the student's status
@@ -224,22 +401,120 @@ export const updateStudentStatus = async (req, res) => {
 
     res.status(StatusCodes.OK).json({
       message: `Student status updated to '${status}'.`,
-      student,
     });
   } catch (error) {
-    res
-      .status(StatusCodes.INTERNAL_SERVER_ERROR)
-      .json({ message: error.message });
+    console.error("Error updating student:", error);
+    next(new BadRequestError(error.message));
+  }
+};
+
+export const addStudentToParent = async (req, res, next) => {
+  try {
+    const { studentId } = req.params; // student ID from URL
+    const { parentId, parentRole } = req.body; // parentId and role (father, mother, singleParent) from body
+    const { role } = req.user;
+
+    // Only admin or proprietor can perform this action
+    if (role !== "admin" && role !== "proprietor") {
+      throw new UnauthorizedError(
+        "Only admin or proprietor can add students to a parent",
+      );
+    }
+
+    // Validate parentRole
+    if (!["father", "mother", "singleParent"].includes(parentRole)) {
+      throw new BadRequestError("Invalid parentRole specified");
+    }
+
+    // Find the parent document
+    const parent = await Parent.findById(parentId);
+    if (!parent) {
+      throw new NotFoundError("Parent record not found");
+    }
+
+    const targetSection = parent[parentRole];
+
+    if (!targetSection) {
+      throw new NotFoundError(`No data found under ${parentRole}`);
+    }
+
+    if (!Array.isArray(targetSection.children)) {
+      targetSection.children = [];
+    }
+
+    if (targetSection.children.includes(studentId)) {
+      throw new BadRequestError("Student already linked to this parent role");
+    }
+
+    targetSection.children.push(studentId);
+    await parent.save();
+
+    res.status(StatusCodes.OK).json({
+      message: `Student successfully added to ${parentRole}`,
+    });
+  } catch (error) {
+    console.log("Add student error:", error);
+    next(new InternalServerError(error.message));
+  }
+};
+
+// Remove student from parent
+export const removeStudentFromParent = async (req, res, next) => {
+  try {
+    const { studentId } = req.params;
+    const { parentId, parentRole } = req.body;
+    const { role } = req.user;
+
+    // Only admin or proprietor can perform this action
+    if (role !== "admin" && role !== "proprietor") {
+      throw new UnauthorizedError(
+        "Only admin or proprietor can remove students from a parent",
+      );
+    }
+
+    // Validate parentRole
+    if (!["father", "mother", "singleParent"].includes(parentRole)) {
+      throw new BadRequestError("Invalid parentRole specified");
+    }
+
+    // Find the parent document
+    const parent = await Parent.findById(parentId);
+    if (!parent) {
+      throw new NotFoundError("Parent record not found");
+    }
+
+    const targetSection = parent[parentRole];
+
+    if (!targetSection || !Array.isArray(targetSection.children)) {
+      throw new NotFoundError(
+        `No valid ${parentRole} data or children list found`,
+      );
+    }
+
+    const index = targetSection.children.indexOf(studentId);
+    if (index === -1) {
+      throw new NotFoundError("Student not linked to this parent role");
+    }
+
+    targetSection.children.splice(index, 1); // Remove student
+    await parent.save();
+
+    res.status(StatusCodes.OK).json({
+      message: `Student successfully removed from ${parentRole}`,
+    });
+  } catch (error) {
+    console.log("Remove student error:", error);
+    next(new InternalServerError(error.message));
   }
 };
 
 // Delete student (Admin Only)
-export const deleteStudent = async (req, res) => {
+export const deleteStudent = async (req, res, next) => {
   try {
     const { id: studentId } = req.params;
     const student = await Student.findOne({ _id: studentId });
 
-    console.log("role", req.user.role);
+    // console.log("role", req.user.role);
 
     if (!student) {
       throw new NotFoundError(`No student found with id: ${studentId}`);
@@ -263,9 +538,9 @@ export const deleteStudent = async (req, res) => {
     );
 
     // Step 3: Optionally, remove the student from the parent's children array
-    if (student.guardian) {
+    if (student.parentGuardianId) {
       await Parent.updateOne(
-        { _id: student.guardian },
+        { _id: student.parentGuardianId },
         { $pull: { children: studentId } }, // Remove the student from the parent's children array
       );
     }
@@ -280,8 +555,7 @@ export const deleteStudent = async (req, res) => {
       .status(StatusCodes.OK)
       .json({ message: "Student and associated records deleted successfully" });
   } catch (error) {
-    res
-      .status(StatusCodes.INTERNAL_SERVER_ERROR)
-      .json({ message: error.message });
+    console.error("Error deleting student:", error);
+    next(new BadRequestError(error.message));
   }
 };

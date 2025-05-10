@@ -9,6 +9,7 @@ import Question from "../models/QuestionsModel.js";
 import StudentAnswer from "../models/StudentAnswerModel.js"; // Adjust the path as needed
 import BadRequestError from "../errors/bad-request.js";
 import NotFoundError from "../errors/not-found.js";
+import InternalServerError from "../errors/internal-server-error.js";
 
 export const createExam = async (req, res, next) => {
   try {
@@ -171,55 +172,200 @@ export const createExam = async (req, res, next) => {
 // Get all exams
 export const getExams = async (req, res, next) => {
   try {
+    // Define allowed query parameters
+    const allowedFilters = [
+      "subjectTeacher",
+      "subject",
+      "evaluationType",
+      "classId",
+      "term",
+      "session",
+      "week",
+      "sort",
+      "page",
+      "limit",
+    ];
+
+    // Get provided query keys
+    const providedFilters = Object.keys(req.query);
+
+    // Check for unknown parameters (ignore case differences if needed)
+    const unknownFilters = providedFilters.filter(
+      (key) => !allowedFilters.includes(key),
+    );
+
+    if (unknownFilters.length > 0) {
+      // Return error if unknown parameters are present
+      throw new BadRequestError(
+        `Unknown query parameter(s): ${unknownFilters.join(", ")}`,
+      );
+    }
+
     const {
       subjectTeacher,
       subject,
-      evaluationType,
       classId,
       term,
       session,
-      week,
+      sort,
+      page,
+      limit,
     } = req.query;
 
-    // Build a query object based on provided filters
-    const queryObject = {};
+    // Build an initial match stage for fields stored directly on Assignment
+    const matchStage = {};
+
+    if (term) matchStage.term = { $regex: term, $options: "i" };
+    if (session) matchStage.session = session;
 
     //queryObject["student.name"] = { $regex: name, $options: "i" }; // Case-insensitive search
 
+    const pipeline = [];
+    pipeline.push({ $match: matchStage });
+
+    // Lookup to join subjectTeacher data from the "staff" collection
+    pipeline.push({
+      $lookup: {
+        from: "staffs", // collection name for staff (ensure this matches your DB)
+        localField: "subjectTeacher",
+        foreignField: "_id",
+        as: "subjectTeacherData",
+      },
+    });
+    pipeline.push({ $unwind: "$subjectTeacherData" });
+
+    // Lookup to join subject data from the "subjects" collection
+    pipeline.push({
+      $lookup: {
+        from: "subjects",
+        localField: "subject",
+        foreignField: "_id",
+        as: "subjectData",
+      },
+    });
+    pipeline.push({ $unwind: "$subjectData" });
+
+    // Lookup to join class data from the "classes" collection
+    pipeline.push({
+      $lookup: {
+        from: "classes",
+        localField: "classId",
+        foreignField: "_id",
+        as: "classData",
+      },
+    });
+    pipeline.push({ $unwind: "$classData" });
+
+    // Build additional matching criteria based on joined fields.
+    const joinMatch = {};
+
     if (subjectTeacher) {
-      queryObject["subjectTeacher"] = { $regex: subjectTeacher, $options: "i" }; // Case-insensitive search
-    }
-    if (subject) {
-      queryObject["subject"] = subject;
-    }
-    if (evaluationType) {
-      queryObject["evaluationType"] = evaluationType;
-    }
-    if (classId) {
-      queryObject["classId"] = classId;
-    }
-    if (week) {
-      queryObject["week"] = week;
-    }
-    if (term) {
-      queryObject["term"] = term;
-    }
-    if (session) {
-      queryObject["session"] = session;
+      const subjectTeacherRegex = {
+        $regex: `^${subjectTeacher}$`,
+        $options: "i",
+      };
+      joinMatch.$or = [
+        {
+          "subjectTeacherData.firstName": subjectTeacherRegex,
+        },
+        {
+          "subjectTeacherData.middleName": subjectTeacherRegex,
+        },
+        {
+          "subjectTeacherData.lastName": subjectTeacherRegex,
+        },
+      ];
     }
 
-    const exams = await Exam.find(queryObject).populate([
-      {
-        path: "questions",
-        select: "_id questionType questionText options files",
+    if (subject) {
+      const subjectRegex = { $regex: `^${subject}$`, $options: "i" };
+      joinMatch.$or = [
+        { "subjectData.subjectName": subjectRegex },
+        { "subjectData.subjectCode": subjectRegex },
+      ];
+    }
+    if (classId) {
+      joinMatch["classData.className"] = {
+        $regex: `^${classId}$`,
+        $options: "i",
+      };
+    }
+    if (Object.keys(joinMatch).length > 0) {
+      pipeline.push({ $match: joinMatch });
+    }
+
+    // Sorting stage: define sort options.
+    // Adjust the sort options to suit your requirements.
+    const sortOptions = {
+      newest: { createdAt: -1 },
+      oldest: { createdAt: 1 },
+      "a-z": { "subjectData.subjectName": 1 },
+      "z-a": { "subjectData.subjectName": -1 },
+    };
+    const sortKey = sortOptions[sort] || sortOptions.newest;
+    pipeline.push({ $sort: sortKey });
+
+    // Pagination stages: Calculate skip and limit.
+    const pageNumber = Number(page) || 1;
+    const limitNumber = Number(limit) || 10;
+    pipeline.push({ $skip: (pageNumber - 1) * limitNumber });
+    pipeline.push({ $limit: limitNumber });
+
+    // Projection stage: structure the output.
+    pipeline.push({
+      $project: {
+        _id: 1,
+        // evaluationType: 1,
+        term: 1,
+        session: 1,
+        lessonWeek: 1,
+        topic: 1,
+        createdAt: 1,
+        subjectTeacher: {
+          _id: "$subjectTeacherData._id",
+          firstName: "$subjectTeacherData.firstName",
+          lastName: "$subjectTeacherData.lastName",
+        },
+        subject: {
+          _id: "$subjectData._id",
+          subjectName: "$subjectData.subjectName",
+          subjectCode: "$subjectData.subjectCode",
+        },
+        classId: {
+          _id: "$classData._id",
+          className: "$classData.className",
+        },
+        // Include other fields from Assignment if needed.
       },
-      { path: "classId", select: "_id className" },
-      { path: "subject", select: "_id subjectName" },
-      { path: "subjectTeacher", select: "_id name" },
-    ]);
-    res.status(StatusCodes.OK).json({ count: exams.length, exams });
+    });
+
+    // Execute the aggregation pipeline
+    const exams = await Exam.aggregate(pipeline);
+
+    // Count total matching documents for pagination.
+    // We use a similar pipeline without $skip, $limit, $sort, and $project.
+    const countPipeline = pipeline.filter(
+      (stage) =>
+        !(
+          "$skip" in stage ||
+          "$limit" in stage ||
+          "$sort" in stage ||
+          "$project" in stage
+        ),
+    );
+    countPipeline.push({ $count: "total" });
+    const countResult = await Exam.aggregate(countPipeline);
+    const totalExams = countResult[0] ? countResult[0].total : 0;
+    const numOfPages = Math.ceil(totalExams / limitNumber);
+
+    res.status(StatusCodes.OK).json({
+      count: totalExams,
+      numOfPages,
+      currentPage: pageNumber,
+      exams,
+    });
   } catch (error) {
-    next(new BadRequestError(error.message));
+    next(new InternalServerError(error.message));
   }
 };
 
@@ -347,7 +493,7 @@ export const updateExam = async (req, res, next) => {
       },
       { path: "classId", select: "_id className" },
       { path: "subject", select: "_id subjectName" },
-      { path: "subjectTeacher", select: "_id name" },
+      { path: "subjectTeacher", select: "_id firstName" },
     ]);
 
     res.status(StatusCodes.OK).json({

@@ -2,9 +2,13 @@ import ClassWork from "../models/ClassWorkModel.js";
 import LessonNote from "../models/LessonNoteModel.js";
 import Class from "../models/ClassModel.js";
 import Question from "../models/QuestionsModel.js";
+import Staff from "../models/StaffModel.js";
 import BadRequestError from "../errors/bad-request.js";
 import NotFoundError from "../errors/not-found.js";
 import { StatusCodes } from "http-status-codes";
+import InternalServerError from "../errors/internal-server-error.js";
+import { createNotificationForClasswork } from "./notificationController.js";
+import Subject from "../models/SubjectModel.js";
 
 // Create ClassWork
 
@@ -140,6 +144,12 @@ export const createClassWork = async (req, res, next) => {
     const classWork = new ClassWork(req.body);
     await classWork.save();
 
+    note.evaluation = classWork._id; // Update the lesson note with the classWork ID
+    await note.save();
+
+    // After classwork is saved, trigger notifications for the class.
+    await createNotificationForClasswork(classWork, req.user.userId);
+
     // Populate fields for the response
     const populatedClassWork = await ClassWork.findById(classWork._id).populate(
       [
@@ -149,7 +159,7 @@ export const createClassWork = async (req, res, next) => {
         },
         { path: "classId", select: "_id className" },
         { path: "subject", select: "_id subjectName" },
-        { path: "subjectTeacher", select: "_id name" },
+        { path: "subjectTeacher", select: "_id firstName" },
         {
           path: "lessonNote",
           select: "_id lessonweek lessonPeriod",
@@ -169,70 +179,205 @@ export const createClassWork = async (req, res, next) => {
 // Get All ClassWorks
 export const getAllClassWorks = async (req, res, next) => {
   try {
+    // Define allowed query parameters
+    const allowedFilters = [
+      "subjectTeacher",
+      "subject",
+      "classId",
+      "term",
+      "session",
+      "lessonWeek",
+      "topic",
+      "sort",
+      "page",
+      "limit",
+    ];
+
+    // Get provided query keys
+    const providedFilters = Object.keys(req.query);
+
+    // Check for unknown parameters (ignore case differences if needed)
+    const unknownFilters = providedFilters.filter(
+      (key) => !allowedFilters.includes(key),
+    );
+
+    if (unknownFilters.length > 0) {
+      // Return error if unknown parameters are present
+      throw new BadRequestError(
+        `Unknown query parameter(s): ${unknownFilters.join(", ")}`,
+      );
+    }
+
     const {
-      subjectTeacher,
-      subject,
-      evaluationType,
-      classId,
+      subjectTeacher, // search term for subject teacher's name
+      subject, // search term for subject's name
+      classId, // search term for class name
       term,
       session,
       lessonWeek,
       topic,
+      sort, // sort criteria (e.g., newest, oldest, a-z, z-a)
+      page, // page number for pagination
+      limit, // number of records per page
     } = req.query;
 
-    // Build a query object based on provided filters
-    const queryObject = {};
+    // Build an initial match stage for fields stored directly on Assignment
+    const matchStage = {};
+    // if (evaluationType) matchStage.evaluationType = evaluationType;
+    if (term) matchStage.term = { $regex: term, $options: "i" };
+    if (session) matchStage.session = session;
+    if (lessonWeek) matchStage.lessonWeek = lessonWeek;
+    if (topic) matchStage.topic = { $regex: topic, $options: "i" };
 
-    //queryObject["student.name"] = { $regex: name, $options: "i" }; // Case-insensitive search
+    const pipeline = [];
+    pipeline.push({ $match: matchStage });
+
+    // Lookup to join subjectTeacher data from the "staff" collection
+    pipeline.push({
+      $lookup: {
+        from: "staffs", // collection name for staff (ensure this matches your DB)
+        localField: "subjectTeacher",
+        foreignField: "_id",
+        as: "subjectTeacherData",
+      },
+    });
+    pipeline.push({ $unwind: "$subjectTeacherData" });
+
+    // Lookup to join subject data from the "subjects" collection
+    pipeline.push({
+      $lookup: {
+        from: "subjects",
+        localField: "subject",
+        foreignField: "_id",
+        as: "subjectData",
+      },
+    });
+    pipeline.push({ $unwind: "$subjectData" });
+
+    // Lookup to join class data from the "classes" collection
+    pipeline.push({
+      $lookup: {
+        from: "classes",
+        localField: "classId",
+        foreignField: "_id",
+        as: "classData",
+      },
+    });
+    pipeline.push({ $unwind: "$classData" });
+
+    // Build additional matching criteria based on joined fields.
+    // Since subjectTeacher, subject, and classId are references, we match on their joined data:
+    const joinMatch = {};
 
     if (subjectTeacher) {
-      queryObject["subjectTeacher"] = { $regex: subjectTeacher, $options: "i" }; // Case-insensitive search
+      const subjectTeacherRegex = {
+        $regex: `^${subjectTeacher}$`,
+        $options: "i",
+      };
+      joinMatch.$or = [
+        {
+          "subjectTeacherData.firstName": subjectTeacherRegex,
+        },
+        {
+          "subjectTeacherData.middleName": subjectTeacherRegex,
+        },
+        {
+          "subjectTeacherData.lastName": subjectTeacherRegex,
+        },
+      ];
     }
+
     if (subject) {
-      queryObject["subject"] = subject;
-    }
-    if (evaluationType) {
-      queryObject["evaluationType"] = evaluationType;
+      const subjectRegex = { $regex: `^${subject}$`, $options: "i" };
+      joinMatch.$or = [
+        { "subjectData.subjectName": subjectRegex },
+        { "subjectData.subjectCode": subjectRegex },
+      ];
     }
     if (classId) {
-      queryObject["classId"] = classId;
+      joinMatch["classData.className"] = {
+        $regex: `^${classId}$`,
+        $options: "i",
+      };
+      // joinMatch["classData.className"] = { $regex: classId, $options: "i" };
     }
-    if (lessonWeek) {
-      queryObject["lessonWeek"] = lessonWeek;
-    }
-    if (topic) {
-      queryObject["topic"] = topic;
-    }
-    if (term) {
-      queryObject["term"] = term;
-    }
-    if (session) {
-      queryObject["session"] = session;
+    if (Object.keys(joinMatch).length > 0) {
+      pipeline.push({ $match: joinMatch });
     }
 
-    const classWorks = await ClassWork.find(queryObject).populate([
-      { path: "questions", select: "_id questionType questionText options" },
-      {
-        path: "classId",
-        select: "_id className",
-      },
-      {
-        path: "subject",
-        select: "_id subjectName",
-      },
-      {
-        path: "subjectTeacher",
-        select: "_id name",
-      },
-      {
-        path: "lessonNote",
-        select: "_id lessonweek lessonPeriod",
-      },
-    ]);
+    // Sorting stage: define sort options.
+    // Adjust the sort options to suit your requirements.
+    const sortOptions = {
+      newest: { createdAt: -1 },
+      oldest: { createdAt: 1 },
+      "a-z": { "subjectData.subjectName": 1 },
+      "z-a": { "subjectData.subjectName": -1 },
+    };
+    const sortKey = sortOptions[sort] || sortOptions.newest;
+    pipeline.push({ $sort: sortKey });
 
-    res.status(StatusCodes.OK).json({ count: classWorks.length, classWorks });
+    // Pagination stages: Calculate skip and limit.
+    const pageNumber = Number(page) || 1;
+    const limitNumber = Number(limit) || 10;
+    pipeline.push({ $skip: (pageNumber - 1) * limitNumber });
+    pipeline.push({ $limit: limitNumber });
+
+    // Projection stage: structure the output.
+    pipeline.push({
+      $project: {
+        _id: 1,
+        // evaluationType: 1,
+        term: 1,
+        session: 1,
+        lessonWeek: 1,
+        topic: 1,
+        createdAt: 1,
+        subjectTeacher: {
+          _id: "$subjectTeacherData._id",
+          firstName: "$subjectTeacherData.firstName",
+          lastName: "$subjectTeacherData.lastName",
+        },
+        subject: {
+          _id: "$subjectData._id",
+          subjectName: "$subjectData.subjectName",
+          subjectCode: "$subjectData.subjectCode",
+        },
+        classId: {
+          _id: "$classData._id",
+          className: "$classData.className",
+        },
+        // Include other fields from Assignment if needed.
+      },
+    });
+
+    // Execute the aggregation pipeline
+    const classWorks = await ClassWork.aggregate(pipeline);
+
+    // Count total matching documents for pagination.
+    // We use a similar pipeline without $skip, $limit, $sort, and $project.
+    const countPipeline = pipeline.filter(
+      (stage) =>
+        !(
+          "$skip" in stage ||
+          "$limit" in stage ||
+          "$sort" in stage ||
+          "$project" in stage
+        ),
+    );
+    countPipeline.push({ $count: "total" });
+    const countResult = await ClassWork.aggregate(countPipeline);
+    const totalClassWorks = countResult[0] ? countResult[0].total : 0;
+    const numOfPages = Math.ceil(totalClassWorks / limitNumber);
+
+    res.status(StatusCodes.OK).json({
+      count: totalClassWorks,
+      numOfPages,
+      currentPage: pageNumber,
+      classWorks,
+    });
   } catch (error) {
-    next(new BadRequestError(error.message));
+    console.error("Error getting class work(s):", error);
+    next(new InternalServerError(error.message));
   }
 };
 
@@ -374,17 +519,55 @@ export const updateClassWork = async (req, res, next) => {
       },
       { path: "classId", select: "_id className" },
       { path: "subject", select: "_id subjectName" },
-      { path: "subjectTeacher", select: "_id name" },
+      { path: "subjectTeacher", select: "_id firstName" },
       {
         path: "lessonNote",
         select: "_id lessonweek lessonPeriod",
       },
     ]);
 
+    const subjectData = await Subject.findById(subject);
+    if (!subjectData) {
+      throw new NotFoundError("Subject not found.");
+    }
+
+    const staffs = await Staff.find({
+      role: { $in: ["admin", "proprietor"] },
+      status: "active",
+    }).select("_id");
+
+    const notificationTitle = `Class Work Updated`;
+
+    const notificationMessage = `The ${subjectData.subjectName} class work for week ${classWork.lessonWeek} on the topic: ${classWork.topic}, subtopic: ${classWork.subTopic}, has been updated. Please check your portal for details `;
+
+    // Prepare recipients
+    const recipients = [
+      ...classWork.students.map((student) => ({
+        recipientId: student._id,
+        recipientModel: "Student",
+      })),
+      ...staffs.map((staff) => ({
+        recipientId: staff._id,
+        recipientModel: "Staff",
+      })),
+    ];
+
+    await sendBulkNotifications({
+      sender: req.user.userId,
+      title: notificationTitle,
+      message: notificationMessage,
+      recipients: recipients,
+      metadata: {
+        broadcastId: new mongoose.Types.ObjectId(),
+        classWorkId: updatedClassWork._id,
+      },
+    });
+
     res
       .status(StatusCodes.OK)
       .json({ message: "class work updated successfully.", updatedClassWork });
   } catch (error) {
+    console.error("Error updating class work:", error);
     next(new BadRequestError(error.message));
   }
 };
@@ -426,6 +609,7 @@ export const submitClassWork = async (req, res, next) => {
       .status(StatusCodes.OK)
       .json({ message: "ClassWork submitted successfully." });
   } catch (error) {
+    console.error("Error submitting class work:", error);
     next(new BadRequestError(error.message));
   }
 };
@@ -455,6 +639,36 @@ export const deleteClassWork = async (req, res, next) => {
     );
     await lessonNoteDoc.save();
 
+    const staffsData = await Staff.find({
+      $or: [{ role: { $in: ["admin", "proprietor"] }, status: "active" }],
+    });
+    if (!staffsData) {
+      throw new NotFoundError("Staff not found.");
+    }
+
+    const staff = staffsData.find((staff) => staff._id.equals(userId));
+
+    const notificationMessage = `The class work for week ${classWork.lessonWeek} has been deleted by ${staff.firstName} ${staff.lastName}. Please check your portal for details.`;
+
+    const recipients = [
+      ...staffsData.map((staff) => {
+        return {
+          recipientId: staff._id,
+          recipientModel: "Staff",
+        };
+      }),
+    ];
+
+    await sendBulkNotifications({
+      sender: req.user.userId,
+      title: "Class Work Deleted",
+      message: notificationMessage,
+      recipients: recipients,
+      metadata: {
+        broadcastId: new mongoose.Types.ObjectId(),
+      },
+    });
+
     // Delete the ClassWork document
     await ClassWork.findByIdAndDelete(id);
 
@@ -462,6 +676,7 @@ export const deleteClassWork = async (req, res, next) => {
       .status(StatusCodes.OK)
       .json({ message: "ClassWork deleted successfully." });
   } catch (error) {
+    console.error("Error deleting class work:", error);
     next(new BadRequestError(error.message));
   }
 };

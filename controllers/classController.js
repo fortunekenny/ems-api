@@ -1,15 +1,15 @@
-import Class from "../models/ClassModel.js";
-import Attendance from "../models/AttendanceModel.js";
 import { StatusCodes } from "http-status-codes";
 import BadRequestError from "../errors/bad-request.js";
-import {
-  generateCurrentTerm,
-  startTermGenerationDate,
-  holidayDurationForEachTerm,
-} from "../utils/termGenerator.js"; // Import the term generation function
 import NotFoundError from "../errors/not-found.js";
 import UnauthorizedError from "../errors/unauthorize.js"; // Direct import of UnauthorizedError
+import InternalServerError from "../errors/internal-server-error.js";
+import Class from "../models/ClassModel.js";
 import checkPermissions from "../utils/checkPermissions.js";
+import {
+  generateCurrentTerm,
+  holidayDurationForEachTerm,
+  startTermGenerationDate,
+} from "../utils/termGenerator.js"; // Import the term generation function
 
 // Create a new class
 export const createClass = async (req, res) => {
@@ -57,14 +57,144 @@ export const createClass = async (req, res) => {
 };
 
 // Get all classes
-export const getClasses = async (req, res) => {
+export const getClasses = async (req, res, next) => {
   try {
-    const classes = await Class.find();
-    res.status(StatusCodes.OK).json({ classes, count: classes.length });
+    // Define allowed query parameters
+    const allowedFilters = [
+      "className",
+      "classTeacher",
+      "term",
+      "session",
+      "sort",
+      "page",
+      "limit",
+    ];
+
+    // Get provided query keys
+    const providedFilters = Object.keys(req.query);
+
+    // Check for unknown parameters (ignore case differences if needed)
+    const unknownFilters = providedFilters.filter(
+      (key) => !allowedFilters.includes(key),
+    );
+
+    if (unknownFilters.length > 0) {
+      // Return error if unknown parameters are present
+      throw new BadRequestError(
+        `Unknown query parameter(s): ${unknownFilters.join(", ")}`,
+      );
+    }
+
+    const { className, classTeacher, term, session, sort, page, limit } =
+      req.query;
+
+    const matchStage = {};
+
+    if (term) matchStage.term = { $regex: term, $options: "i" };
+    if (session) matchStage.session = session;
+    if (className) matchStage.className = className;
+    // if (topic) matchStage.topic = { $regex: topic, $options: "i" };
+
+    const pipeline = [];
+    pipeline.push({ $match: matchStage });
+
+    // Lookup to join subjectTeacher data from the "staff" collection
+    pipeline.push({
+      $lookup: {
+        from: "staffs", // collection name for staff (ensure this matches your DB)
+        localField: "classTeacher",
+        foreignField: "_id",
+        as: "classTeacherData",
+      },
+    });
+    pipeline.push({ $unwind: "$classTeacherData" });
+
+    const joinMatch = {};
+
+    if (classTeacher) {
+      const classTeacherRegex = {
+        $regex: `^${classTeacher}$`,
+        $options: "i",
+      };
+      joinMatch.$or = [
+        {
+          "classTeacherData.firstName": classTeacherRegex,
+        },
+        {
+          "classTeacherData.middleName": classTeacherRegex,
+        },
+        {
+          "classTeacherData.lastName": classTeacherRegex,
+        },
+      ];
+    }
+
+    if (Object.keys(joinMatch).length > 0) {
+      pipeline.push({ $match: joinMatch });
+    }
+
+    const sortOptions = {
+      newest: { createdAt: -1 },
+      oldest: { createdAt: 1 },
+      "a-z": { className: 1 },
+      "z-a": { className: -1 },
+    };
+
+    const sortKey = sortOptions[sort] || sortOptions.newest;
+    pipeline.push({ $sort: sortKey });
+
+    const pageNumber = Number(page) || 1;
+    const limitNumber = Number(limit) || 10;
+    pipeline.push({ $skip: (pageNumber - 1) * limitNumber });
+    pipeline.push({ $limit: limitNumber });
+
+    // Projection stage: structure the output.
+    pipeline.push({
+      $project: {
+        _id: 1,
+        className: 1,
+        term: 1,
+        session: 1,
+        createdAt: 1,
+        classTeacher: {
+          _id: "$classTeacherData._id",
+          firstName: "$classTeacherData.firstName",
+          lastName: "$classTeacherData.lastName",
+        },
+      },
+    });
+
+    const classes = await Class.aggregate(pipeline);
+
+    // Count total matching documents for pagination.
+    // We use a similar pipeline without $skip, $limit, $sort, and $project.
+    const countPipeline = pipeline.filter(
+      (stage) =>
+        !(
+          "$skip" in stage ||
+          "$limit" in stage ||
+          "$sort" in stage ||
+          "$project" in stage
+        ),
+    );
+
+    countPipeline.push({ $count: "total" });
+
+    const countResult = await Class.aggregate(countPipeline);
+
+    const totalClasses = countResult[0] ? countResult[0].total : 0;
+
+    const numOfPages = Math.ceil(totalClasses / limitNumber);
+
+    res.status(StatusCodes.OK).json({
+      count: totalClasses,
+      numOfPages,
+      currentPage: pageNumber,
+      classes,
+    });
   } catch (error) {
-    res
-      .status(StatusCodes.INTERNAL_SERVER_ERROR)
-      .json({ message: error.message });
+    console.error("Error getting classes:", error);
+    next(new InternalServerError(error.message));
   }
 };
 
@@ -107,6 +237,7 @@ export const updateClass = async (req, res) => {
       subjects,
       session,
       timetable,
+      students,
     } = req.body;
 
     // Find the class by ID
@@ -137,6 +268,7 @@ export const updateClass = async (req, res) => {
     updatedClass.session = session || updatedClass.session;
     updatedClass.term = term || updatedClass.term;
     updatedClass.timetable = timetable || updatedClass.timetable;
+    updatedClass.students = students || updatedClass.students;
 
     // Save the updated class
     await updatedClass.save();

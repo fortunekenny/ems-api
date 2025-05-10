@@ -17,17 +17,31 @@ const studentSchema = new mongoose.Schema({
     ref: "Class",
     required: true,
   }, // Class reference
-  guardian: {
+  parentGuardianId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "Parent",
-    required: true, // Guardian reference
+    required: false, // Guardian reference
   },
   attendance: [{ type: mongoose.Schema.Types.ObjectId, ref: "Attendance" }], // Define as array of ObjectIds
   role: { type: String, default: "student" }, // Default role for students
   status: { type: String, enum: ["active", "inactive"], default: "active" },
+  isVerified: { type: Boolean, default: false },
   session: { type: String, required: false }, // e.g., 2023/2024
   term: { type: String, required: false }, // Term (e.g., First, Second, Third)
-  age: { type: Number, required: true }, // Age of the student
+  dateOfBirth: {
+    type: String, // Store date as a string to validate custom format
+    required: [true, "Please provide date of birth"],
+    validate: {
+      validator: function (v) {
+        // Regular expression to validate dd/mm/yyyy format
+        return /^(0[1-9]|[12][0-9]|3[01])\/(0[1-9]|1[0-2])\/(\d{2}|\d{4})$/.test(
+          v,
+        );
+      },
+      message: "Invalid date format. Expected format: dd/mm/yy or dd/mm/yyyy",
+    },
+  },
+  age: { type: Number }, // Age of the student
   gender: { type: String, enum: ["male", "female"], required: true }, // Gender: male or female
   medicalHistory: { type: String }, // Optional: Medical history
   createdAt: { type: Date, default: Date.now }, // Creation timestamp
