@@ -434,11 +434,11 @@ export const deleteStudentAttendanceForTerm = async (req, res) => {
   }
 
   // Get current term and session details
-  const { term } = getCurrentTermDetails(
+  const { term, session } = getCurrentTermDetails(
     startTermGenerationDate,
     holidayDurationForEachTerm,
   ); // Adjust this if you need the session as well
-  const session = getCurrentSession(); // Fetch session separately
+  // const session = getCurrentSession(); // Fetch session separately
 
   try {
     // Delete attendance records based on student ID, current term, and session
@@ -450,14 +450,102 @@ export const deleteStudentAttendanceForTerm = async (req, res) => {
 
     if (deleteResult.deletedCount === 0) {
       throw new NotFoundError(
-        `No attendance records found for student ID: ${studentId} in the current term and session.`,
+        `No attendance records found for this student in the current term and session.`,
       );
     }
 
     res.status(StatusCodes.OK).json({
-      message: `Deleted ${deleteResult.deletedCount} attendance records for student ID: ${studentId} in the current term and session.`,
+      message: `Deleted ${deleteResult.deletedCount} attendance records for student in the current term and session.`,
     });
   } catch (error) {
+    console.log("Error deleting attendance records: ", error);
+    next(new InternalServerError(error.message));
+  }
+};
+
+// Create attendance records for a student for the current or next term
+export const createStudentTermAttendance = async (req, res, next) => {
+  try {
+    const { studentId } = req.params;
+    if (!studentId) {
+      throw new BadRequestError("Student ID is required.");
+    }
+
+    // Get current term/session details
+    const termDetails = getCurrentTermDetails(
+      startTermGenerationDate,
+      holidayDurationForEachTerm,
+    );
+    let { term, session, isHoliday, nextTerm, nextSession, schoolDays } =
+      termDetails;
+
+    // If isHoliday, use nextTerm (and nextSession if term is third)
+    if (isHoliday) {
+      term = nextTerm;
+      if (termDetails.term === "third") {
+        session = nextSession;
+      }
+      // Recalculate schoolDays for the next term
+      const nextTermDetails = getCurrentTermDetails(
+        termDetails.nextTermStartDate,
+        holidayDurationForEachTerm,
+      );
+      schoolDays = nextTermDetails.schoolDays;
+    }
+
+    // Find the student and their class
+    const student = await Student.findById(studentId);
+    if (!student) {
+      throw new NotFoundError("Student not found.");
+    }
+    const classId =
+      student.academicRecords?.find(
+        (rec) => rec.term === term && rec.session === session,
+      )?.classId || student.classId;
+
+    // Get the class teacher
+    const assignedClass = await Class.findById(classId);
+    const classTeacher = assignedClass ? assignedClass.classTeacher : undefined;
+
+    // Create attendance records for each school day
+    const attendanceIds = [];
+    for (const date of schoolDays) {
+      const attendance = new Attendance({
+        student: student._id,
+        classId: classId,
+        date: date,
+        morningStatus: "pending",
+        afternoonStatus: "pending",
+        classTeacher: classTeacher,
+        term,
+        session,
+      });
+      const savedAttendance = await attendance.save();
+      attendanceIds.push(savedAttendance._id);
+    }
+
+    // Update student's academicRecords.attendance array for the correct term/session/class
+    // Find the correct academic record
+    const recordIndex = student.academicRecords.findIndex(
+      (rec) =>
+        rec.term === term &&
+        rec.session === session &&
+        rec.classId?.toString() === classId.toString(),
+    );
+    if (recordIndex !== -1) {
+      // Append new attendance IDs to the academic record's attendance array
+      student.academicRecords[recordIndex].attendance = [
+        ...(student.academicRecords[recordIndex].attendance || []),
+        ...attendanceIds,
+      ];
+      await student.save();
+    }
+
+    res.status(StatusCodes.CREATED).json({
+      message: `Attendance records created for student for term ${term} (${session})`,
+    });
+  } catch (error) {
+    console.log("Error creating student term attendance", error);
     next(new InternalServerError(error.message));
   }
 };

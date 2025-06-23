@@ -1,12 +1,9 @@
 import mongoose from "mongoose";
-import { generateCurrentTerm } from "../utils/termGenerator.js";
-
-// Utility functions
-const getCurrentSession = () => {
-  const date = new Date();
-  const currentYear = date.getFullYear();
-  return `${currentYear}/${currentYear + 1}`;
-};
+import {
+  getCurrentTermDetails,
+  startTermGenerationDate,
+  holidayDurationForEachTerm,
+} from "../utils/termGenerator.js";
 
 const classSchema = new mongoose.Schema({
   className: { type: String, required: true, unique: true }, // e.g., Grade 10, Grade 11
@@ -25,8 +22,26 @@ const classSchema = new mongoose.Schema({
   ],
   students: [{ type: mongoose.Schema.Types.ObjectId, ref: "Student" }], // List of students in the class
   subjects: [{ type: mongoose.Schema.Types.ObjectId, ref: "Subject" }], // Subjects taught in the class. Input if not class teacher or class teacher but teaches other class
-  session: { type: String, required: true }, // e.g., 2023/2024
-  term: { type: String, required: true }, // e.g., First, Second, Third
+  session: {
+    type: String,
+    default: function () {
+      const { session } = getCurrentTermDetails(
+        startTermGenerationDate,
+        holidayDurationForEachTerm,
+      );
+      return session;
+    },
+  }, // e.g., 2023/2024
+  term: {
+    type: String,
+    default: function () {
+      const { term } = getCurrentTermDetails(
+        startTermGenerationDate,
+        holidayDurationForEachTerm,
+      );
+      return term;
+    },
+  }, // e.g., First, Second, Third
   timetable: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "Timetable", // Reference to Timetable
@@ -38,17 +53,17 @@ const classSchema = new mongoose.Schema({
 
 classSchema.pre("validate", async function (next) {
   if (this.isNew) {
-    if (!this.session) {
+    /*     if (!this.session) {
       this.session = getCurrentSession(); // Set the current academic session
-    }
+    } */
   }
   next();
 });
 
 // Method to dynamically update term based on start date and holiday durations
-classSchema.methods.updateTerm = function (startDate, holidayDurations) {
+/* classSchema.methods.updateTerm = function (startDate, holidayDurations) {
   this.term = generateCurrentTerm(startDate, holidayDurations); // Call the term generator function
-};
+}; */
 
 const Class = mongoose.model("Class", classSchema);
 

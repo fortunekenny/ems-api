@@ -354,7 +354,7 @@ const studentAnswerSchema = new mongoose.Schema(
 );
 
 // Pre-validation hook to check and set session, term, and week of term before validation
-studentAnswerSchema.pre("validate", function (next) {
+/* studentAnswerSchema.pre("validate", function (next) {
   if (this.isNew) {
     const startDate = startTermGenerationDate; // Use createdAt or default start date if no answer date is provided
 
@@ -373,7 +373,7 @@ studentAnswerSchema.pre("validate", function (next) {
   }
 
   next();
-});
+}); */
 
 // Create the StudentAnswer model
 const StudentAnswer = mongoose.model("StudentAnswer", studentAnswerSchema);

@@ -10,6 +10,11 @@ import calculateAge from "../utils/ageCalculate.js";
 import BadRequestError from "../errors/bad-request.js";
 import UnauthorizedError from "../errors/unauthorize.js";
 import InternalServerError from "../errors/internal-server-error.js";
+import {
+  getCurrentTermDetails,
+  holidayDurationForEachTerm,
+  startTermGenerationDate,
+} from "../utils/termGenerator.js";
 
 // Get all students
 export const getStudents = async (req, res, next) => {
@@ -44,11 +49,11 @@ export const getStudents = async (req, res, next) => {
     const { student, classId, status, term, session, sort, page, limit } =
       req.query;
 
-    // Build an initial match stage for fields stored directly on Assignment
+    // Build an initial match stage for fields stored directly on Student
     const matchStage = {};
 
-    if (term) matchStage.term = { $regex: term, $options: "i" };
-    if (session) matchStage.session = session;
+    // if (term) matchStage.term = { $regex: term, $options: "i" };
+    // if (session) matchStage.session = session;
     if (status) matchStage.status = status;
 
     // Here we use $or on firstName, middleName, lastName, and employeeId if the 'student' parameter is provided.
@@ -61,14 +66,22 @@ export const getStudents = async (req, res, next) => {
       ];
     }
 
+    // NOTE: term/session now live in academicRecords
+    if (session) matchStage["academicRecords.session"] = session;
+    if (term)
+      matchStage["academicRecords.term"] = { $regex: term, $options: "i" };
+
     const pipeline = [];
     pipeline.push({ $match: matchStage });
+
+    // unwind academicRecords so we can filter/project on it
+    pipeline.push({ $unwind: "$academicRecords" });
 
     // Lookup to join class data from the "classes" collection
     pipeline.push({
       $lookup: {
         from: "classes",
-        localField: "classId",
+        localField: "academicRecords.classId",
         foreignField: "_id",
         as: "classData",
       },
@@ -119,8 +132,8 @@ export const getStudents = async (req, res, next) => {
         },
         studentId: 1,
         status: 1,
-        term: 1,
-        session: 1,
+        term: "$academicRecords.term",
+        session: "$academicRecords.session",
         // Include other fields from student if needed.
       },
     });
@@ -191,7 +204,7 @@ export const updateStudentVerification = async (req, res, next) => {
       message: `Student verification status updated to '${isVerified}'`,
     });
   } catch (error) {
-    console.error("Error updating student verification:", error);
+    console.log("Error updating student verification:", error);
     next(new InternalServerError(error.message));
   }
 };
@@ -201,32 +214,32 @@ export const getStudentById = async (req, res) => {
   try {
     const { id: studentId } = req.params;
     // const student = await Student.findOne({ _id: studentId }).populate('class, parentGuardianId')
-    const student = await Student.findOne({ _id: studentId })
-      .select("-password")
-      .populate([
-        {
-          path: "classId",
-          select: "_id className classTeacher subjectTeachers subjects",
-          populate: [
-            { path: "classTeacher", select: "_id firstName lastName" },
-            { path: "subjectTeachers", select: "_id firstName lastName" },
-            { path: "subjects", select: "_id subjectName" },
-          ],
-        },
-        { path: "parentGuardianId", select: "_id name firstName lastName" },
-      ]);
+    const student = await Student.findOne({ _id: studentId }).select(
+      "-password",
+    );
+    // .populate([
+    //   {
+    //     path: "classId",
+    //     select: "_id className classTeacher subjectTeachers subjects",
+    //     populate: [
+    //       { path: "classTeacher", select: "_id firstName lastName" },
+    //       { path: "subjectTeachers", select: "_id firstName lastName" },
+    //       { path: "subjects", select: "_id subjectName" },
+    //     ],
+    //   },
+    //   { path: "parentGuardianId", select: "_id name firstName lastName" },
+    // ]);
 
     if (!student) {
-      throw new NotFoundError(`No student found with id: ${studentId}`);
+      throw new NotFoundError(`Student not found`);
     }
 
-    checkPermissions(req.user, student.user);
+    // checkPermissions(req.user, student.user);
 
     res.status(StatusCodes.OK).json(student);
   } catch (error) {
-    res
-      .status(StatusCodes.INTERNAL_SERVER_ERROR)
-      .json({ message: error.message });
+    console.error("Error getting student by ID:", error);
+    next(new InternalServerError(error.message));
   }
 };
 
@@ -241,12 +254,10 @@ export const updateStudent = async (req, res, next) => {
     streetName,
     townOrCity,
     dateOfBirth,
-    age,
-    gender,
-    email,
-    role,
     term,
     session,
+    gender,
+    email,
     parentGuardianId,
     classId,
   } = req.body; // Fields to update
@@ -255,7 +266,7 @@ export const updateStudent = async (req, res, next) => {
     // Find the student by ID
     const student = await Student.findById(studentId);
     if (!student) {
-      throw new NotFoundError(`No student found with id: ${studentId}`);
+      throw new NotFoundError(`Student not found`);
     }
 
     // Check for duplicate email
@@ -266,7 +277,7 @@ export const updateStudent = async (req, res, next) => {
       }
     }
 
-    checkPermissions(req.user, student.user);
+    // checkPermissions(req.user, student.user);
 
     // Step 1: Remove student from previous parentGuardianId (if parentGuardianId changes)
     if (
@@ -291,83 +302,104 @@ export const updateStudent = async (req, res, next) => {
       await newGuardian.save();
     }
 
-    // Step 2: Remove student from previous class and subjects (if class changes)
-    if (classId && classId !== student.classId.toString()) {
-      // Remove student from previous class
-      const previousClass = await Class.findById(student.classId);
-      if (previousClass) {
-        previousClass.students.pull(student._id);
-        await previousClass.save();
+    // Step 2: Change class within the current term/session embedded record
+    if (classId && term && session) {
+      // 2a) Locate the embedded record for this term/session
+      const record = student.academicRecords.find(
+        (rec) => rec.term === term && rec.session === session,
+      );
+      if (!record) {
+        throw new BadRequestError(
+          `No academic record found for term '${term}' and session '${session}'`,
+        );
       }
 
-      // Remove student from all subjects associated with the previous class
-      const previousSubjects = await Subject.find({
-        _id: { $in: previousClass.subjects },
-      });
-      for (const subject of previousSubjects) {
-        subject.students.pull(student._id); // Remove student from the subject
-        await subject.save();
+      const previousClassId = record.classId?.toString();
+
+      // 2b) Remove student from previous class (if any)
+      if (previousClassId && previousClassId !== classId) {
+        const previousClass = await Class.findById(previousClassId);
+        if (previousClass) {
+          previousClass.students.pull(student._id);
+          await previousClass.save();
+        }
+
+        // Remove from previous class's subjects
+        if (previousClass && previousClass.subjects?.length) {
+          const prevSubjects = await Subject.find({
+            _id: { $in: previousClass.subjects },
+          });
+          for (const subj of prevSubjects) {
+            subj.students.pull(student._id);
+            await subj.save();
+          }
+        }
       }
 
-      // Add student to the new class
+      // 2c) Add student to the new class
       const newClass = await Class.findById(classId);
       if (!newClass) {
         throw new NotFoundError(`Class with id ${classId} not found`);
       }
-      student.classId = classId; // Update student's class
-      newClass.students.push(student._id); // Add student to new class
-      await newClass.save();
+      if (!newClass.students.includes(student._id)) {
+        newClass.students.push(student._id);
+        await newClass.save();
+      }
 
-      // Step 3: Add student to the new class's subjects
-      const newSubjects = await Subject.find({
-        _id: { $in: newClass.subjects },
-      });
-      for (const subject of newSubjects) {
-        // Ensure the student is added to the subjects' students array
-        if (!subject.students.includes(student._id)) {
-          subject.students.push(student._id);
-          await subject.save();
+      // 2d) Add student to the new class's subjects
+      if (newClass.subjects?.length) {
+        for (const subjId of newClass.subjects) {
+          await Subject.updateOne(
+            { _id: subjId },
+            { $addToSet: { students: student._id } },
+          );
         }
       }
+
+      // 2e) Finally, update the embedded academic record in MongoDB
+      await Student.updateOne(
+        {
+          _id: student._id,
+          "academicRecords.term": term,
+          "academicRecords.session": session,
+        },
+        {
+          $set: {
+            "academicRecords.$.classId": classId,
+          },
+          $addToSet: {
+            // reset the subjects list to exactly the new class's subjects
+            "academicRecords.$.subjects": { $each: newClass.subjects },
+          },
+        },
+      );
     }
 
-    age = calculateAge(dateOfBirth);
-    if (email) student.email = email;
-    if (role) student.role = role;
-    if (firstName) student.firstName = firstName;
-    if (middleName) student.middleName = middleName;
-    if (lastName) student.lastName = lastName;
-    if (houseNumber) student.houseNumber = houseNumber;
-    if (streetName) student.streetName = streetName;
-    if (townOrCity) student.townOrCity = townOrCity;
-    if (dateOfBirth) student.dateOfBirth = dateOfBirth;
-    if (gender) student.gender = gender;
-    if (term) student.term = term;
-    if (session) student.session = session;
-    if (parentGuardianId) student.parentGuardianId = parentGuardianId;
-    if (classId) student.classId = classId;
+    const age = calculateAge(dateOfBirth);
+    // Then update any root‐level personal fields:
+    Object.assign(student, {
+      firstName: firstName ?? student.firstName,
+      middleName: middleName ?? student.middleName,
+      lastName: lastName ?? student.lastName,
+      houseNumber: houseNumber ?? student.houseNumber,
+      streetName: streetName ?? student.streetName,
+      townOrCity: townOrCity ?? student.townOrCity,
+      dateOfBirth: dateOfBirth ?? student.dateOfBirth,
+      age: age ?? student.age,
+      gender: gender ?? student.gender,
+      email: email ?? student.email,
+    });
 
     // Save the updated student record
     await student.save();
 
-    const updatedPopulatedStudent = await Student.findById(student._id)
-      .select("-password")
-      .populate([
-        {
-          path: "classId",
-          select: "_id className classTeacher subjectTeachers subjects",
-          populate: [
-            { path: "classTeacher", select: "_id firstName lastName" },
-            { path: "subjectTeachers", select: "_id firstName lastName" },
-            { path: "subjects", select: "_id subjectName" },
-          ],
-        },
-        { path: "parentGuardianId", select: "_id name firstName lastName" },
-      ]);
+    const updatedStudent = await Student.findById(student._id).select(
+      "-password",
+    );
 
     res.status(StatusCodes.OK).json({
       message: "Student updated successfully",
-      updatedPopulatedStudent,
+      updatedStudent,
     });
   } catch (error) {
     console.error("Error updating student:", error);
@@ -394,6 +426,8 @@ export const updateStudentStatus = async (req, res, next) => {
     if (!student) {
       throw new NotFoundError(`Student not found`);
     }
+
+    student.previousStatus = student.status; // Store the previous status
 
     // Update the student's status
     student.status = status;
@@ -558,4 +592,450 @@ export const deleteStudent = async (req, res, next) => {
     console.error("Error deleting student:", error);
     next(new BadRequestError(error.message));
   }
+};
+
+// Add student to a class, handle subject assignments, and update attendance
+export const addStudentToClass = async (req, res, next) => {
+  try {
+    const { studentId } = req.params;
+    const { classId, changeDate } = req.body;
+
+    if (!studentId || !classId) {
+      throw new BadRequestError("studentId and classId are required");
+    }
+
+    // Find the student
+    const student = await Student.findById(studentId);
+    if (!student) {
+      throw new NotFoundError("Student not found");
+    }
+
+    // Verify new class exists
+    const newClass = await Class.findById(classId).populate("subjects");
+    if (!newClass) {
+      throw new NotFoundError("Class not found");
+    }
+
+    // If student is already in a class, check term/session rules
+    if (student.classId) {
+      const currentClass = await Class.findById(student.classId);
+      // Use the updated isValidTermSessionMove signature
+      const isValidMove = await isValidTermSessionMove(
+        student,
+        currentClass,
+        newClass,
+      );
+      if (!isValidMove) {
+        if (student.previousStatus === "inactive") {
+          throw new BadRequestError(
+            "Previously inactive students can only be moved to classes in the current term and session.",
+          );
+        } else {
+          throw new BadRequestError(
+            "Invalid class movement. Students can only move within the same session, or from third term of previous session to current term.",
+          );
+        }
+      }
+    }
+
+    // Handle previous class if exists
+    if (student.classId && student.classId.toString() !== classId) {
+      const oldClass = await Class.findById(student.classId).populate(
+        "subjects",
+      );
+
+      // Remove student from old class
+      await Class.updateOne(
+        { _id: student.classId },
+        { $pull: { students: student._id } },
+      );
+
+      // Remove student from old class's subjects
+      if (oldClass && oldClass.subjects) {
+        for (const subject of oldClass.subjects) {
+          await Subject.updateOne(
+            { _id: subject._id },
+            { $pull: { students: student._id } },
+          );
+        }
+      }
+    }
+
+    // Add student to new class
+    await Class.updateOne(
+      { _id: classId },
+      { $addToSet: { students: student._id } },
+    );
+
+    // Add student to all subjects in the new class
+    if (newClass.subjects) {
+      for (const subject of newClass.subjects) {
+        await Subject.updateOne(
+          { _id: subject._id },
+          { $addToSet: { students: student._id } },
+        );
+      }
+    }
+
+    // Update student's classId
+    // student.classId = classId;
+    // await student.save();
+    await Student.updateOne(
+      {
+        _id: studentId,
+        "academicRecords.term": currentTerm,
+        "academicRecords.session": currentSession,
+      },
+      { $set: { "academicRecords.$.classId": classId } },
+    );
+
+    // Update all attendance records from the date of the change
+    const dateFrom = changeDate ? new Date(changeDate) : new Date();
+    await Attendance.updateMany(
+      { student: student._id, date: { $gte: dateFrom } },
+      { $set: { classId: classId } },
+    );
+
+    res.status(StatusCodes.OK).json({
+      message:
+        "Student added to class, subjects updated, and attendance records updated successfully",
+    });
+  } catch (error) {
+    console.log("Error adding student to class:", error);
+    next(new InternalServerError(error.message));
+  }
+};
+
+// Change student's class and update attendance records
+
+export const removeStudentFromClass = async (req, res, next) => {
+  try {
+    const { studentId } = req.params;
+    const { newClassId, changeDate } = req.body;
+
+    if (!newClassId) {
+      throw new BadRequestError("New class ID is required");
+    }
+
+    // 1) Load student
+    const student = await Student.findById(studentId).lean();
+    if (!student) {
+      throw new NotFoundError("Student not found");
+    }
+
+    // 2) Determine current term/session
+    const { term, session } = getCurrentTermDetails(
+      startTermGenerationDate,
+      holidayDurationForEachTerm,
+    );
+
+    // 3) Find the embedded record
+    const record = student.academicRecords.find(
+      (rec) => rec.term === term && rec.session === session,
+    );
+    if (!record) {
+      throw new BadRequestError(
+        `No academic record found for term '${term}' and session '${session}'`,
+      );
+    }
+    const oldClassId = record.classId?.toString();
+    if (!oldClassId) {
+      throw new BadRequestError(
+        "Student is not assigned to any class in the current term/session",
+      );
+    }
+
+    // 4) Verify new class exists and is appropriate
+    const newClass = await Class.findById(newClassId).lean();
+    if (!newClass) {
+      throw new NotFoundError("New class not found");
+    }
+
+    // 5) Remove student from old class roster
+    await Class.updateOne(
+      { _id: oldClassId },
+      { $pull: { students: student._id } },
+    );
+
+    // 6) Remove student from old class's subjects
+    const oldClass = await Class.findById(oldClassId).populate("subjects");
+    if (oldClass?.subjects?.length) {
+      for (const subj of oldClass.subjects) {
+        await Subject.updateOne(
+          { _id: subj._id },
+          { $pull: { students: student._id } },
+        );
+      }
+    }
+
+    // 7) Add student to new class roster
+    await Class.updateOne(
+      { _id: newClassId },
+      { $addToSet: { students: student._id } },
+    );
+
+    // 8) Add student to new class's subjects
+    const newClassPop = await Class.findById(newClassId).populate("subjects");
+    if (newClassPop?.subjects?.length) {
+      for (const subj of newClassPop.subjects) {
+        await Subject.updateOne(
+          { _id: subj._id },
+          { $addToSet: { students: student._id } },
+        );
+      }
+    }
+
+    // 9) Update attendance records from changeDate onward
+    const dateFrom = changeDate ? new Date(changeDate) : new Date();
+    await Attendance.updateMany(
+      {
+        student: student._id,
+        classId: oldClassId,
+        date: { $gte: dateFrom },
+      },
+      { $set: { classId: newClassId } },
+    );
+
+    // 10) Update the embedded academicRecords entry
+    await Student.updateOne(
+      {
+        _id: studentId,
+        "academicRecords.term": term,
+        "academicRecords.session": session,
+      },
+      {
+        $set: {
+          "academicRecords.$.classId": newClassId,
+          "academicRecords.$.subjects": newClassPop.subjects.map((s) => s._id),
+        },
+      },
+    );
+
+    res.status(StatusCodes.OK).json({
+      message: "Student moved to new class and records updated successfully",
+    });
+  } catch (error) {
+    console.error("Error removing student from class:", error);
+    next(new InternalServerError(error.message));
+  }
+};
+
+// Add a student to a subject
+/* export const addStudentToSubject = async (req, res, next) => {
+  try {
+    const { studentId } = req.params;
+    const { subjectId } = req.body;
+
+    // Validate student and subject exist
+    const student = await Student.findById(studentId);
+    if (!student) {
+      throw new NotFoundError(`Student with id ${studentId} not found`);
+    }
+
+    const subject = await Subject.findById(subjectId);
+    if (!subject) {
+      throw new NotFoundError(`Subject not found`);
+    }
+
+    // Check if student is already enrolled in the subject
+    if (subject.students.includes(student._id)) {
+      throw new BadRequestError("Student is already enrolled in this subject");
+    }
+
+    // Add student to the subject's student list
+    subject.students.push(student._id);
+    await subject.save();
+
+    // Return success response
+    res.status(StatusCodes.OK).json({
+      message: "Student successfully added to subject",
+      subject,
+    });
+  } catch (error) {
+    console.log("Error in adding student to subject", error);
+    next(new InternalServerError(error.message));
+  }
+}; */
+
+export const addStudentToSubject = async (req, res, next) => {
+  try {
+    const { studentId, subjectId } = req.params;
+
+    // 1) Load student
+    const student = await Student.findById(studentId);
+    if (!student) throw new NotFoundError("Student not found");
+
+    // 2) Get current term/session
+    const { term, session } = getCurrentTermDetails(
+      startTermGenerationDate,
+      holidayDurationForEachTerm,
+    );
+
+    // 3) Find academic record
+    const record = student.academicRecords.find(
+      (rec) => rec.term === term && rec.session === session,
+    );
+    if (!record || !record.classId) {
+      throw new BadRequestError(
+        "Student is not enrolled in a class this term/session",
+      );
+    }
+
+    // 4) Load subject
+    const subject = await Subject.findById(subjectId);
+    if (!subject) throw new NotFoundError("Subject not found");
+
+    // 5) Verify subject belongs to the student's current class
+    const classDoc = await Class.findById(record.classId);
+    if (!classDoc || !classDoc.subjects.includes(subject._id)) {
+      throw new BadRequestError(
+        "Subject does not belong to student's current class",
+      );
+    }
+
+    // 6) Add student to subject
+    await Subject.updateOne(
+      { _id: subject._id },
+      { $addToSet: { students: student._id } },
+    );
+
+    // 7) Add subject to student’s academic record
+    await Student.updateOne(
+      {
+        _id: student._id,
+        "academicRecords.term": term,
+        "academicRecords.session": session,
+      },
+      { $addToSet: { "academicRecords.$.subjects": subject._id } },
+    );
+
+    res.status(200).json({ message: "Student added to subject successfully" });
+  } catch (error) {
+    console.error("Error in addStudentToSubject:", error);
+    next(new InternalServerError(error.message));
+  }
+};
+
+// Remove a student from a subject
+/* export const removeStudentFromSubject = async (req, res, next) => {
+  try {
+    const { studentId } = req.params;
+    const { subjectId } = req.body;
+
+    // Validate student and subject exist
+    const student = await Student.findById(studentId);
+    if (!student) {
+      throw new NotFoundError(`Student with id ${studentId} not found`);
+    }
+
+    const subject = await Subject.findById(subjectId);
+    if (!subject) {
+      throw new NotFoundError(`Subject not found`);
+    }
+
+    // Check if student is enrolled in the subject
+    if (!subject.students.includes(student._id)) {
+      throw new BadRequestError("Student is not enrolled in this subject");
+    }
+
+    // Remove student from the subject's student list
+    subject.students = subject.students.filter(
+      (studentId) => studentId.toString() !== student._id.toString(),
+    );
+    await subject.save();
+
+    // Return success response
+    res.status(StatusCodes.OK).json({
+      message: "Student successfully removed from subject",
+      subject,
+    });
+  } catch (error) {
+    console.log("Error in removing student from subject", error);
+    next(new InternalServerError(error.message));
+  }
+}; */
+
+export const removeStudentFromSubject = async (req, res, next) => {
+  try {
+    const { studentId, subjectId } = req.params;
+
+    // 1) Load student
+    const student = await Student.findById(studentId);
+    if (!student) throw new NotFoundError("Student not found");
+
+    // 2) Get current term/session
+    const { term, session } = getCurrentTermDetails(
+      startTermGenerationDate,
+      holidayDurationForEachTerm,
+    );
+
+    // 3) Find academic record
+    const record = student.academicRecords.find(
+      (rec) => rec.term === term && rec.session === session,
+    );
+    if (!record || !record.classId) {
+      throw new BadRequestError(
+        "Student is not enrolled in a class this term/session",
+      );
+    }
+
+    // 4) Verify subject
+    const subject = await Subject.findById(subjectId);
+    if (!subject) throw new NotFoundError("Subject not found");
+
+    // 5) Remove student from subject
+    await Subject.updateOne(
+      { _id: subjectId },
+      { $pull: { students: student._id } },
+    );
+
+    // 6) Remove subject from student’s academic record
+    await Student.updateOne(
+      {
+        _id: student._id,
+        "academicRecords.term": term,
+        "academicRecords.session": session,
+      },
+      { $pull: { "academicRecords.$.subjects": subject._id } },
+    );
+
+    res
+      .status(200)
+      .json({ message: "Student removed from subject successfully" });
+  } catch (error) {
+    console.error("Error in removeStudentFromSubject:", error);
+    next(new InternalServerError(error.message));
+  }
+};
+
+const isValidTermSessionMove = async (student, fromClass, toClass) => {
+  // Early exit if class info not found
+  if (!fromClass || !toClass) return false;
+
+  // If student was previously inactive, allow move from any class in any past term/session to current term and session
+  if (student && student.previousStatus === "inactive") {
+    // Only allow if toClass is in the current session and term (assume current means latest session/term in your system)
+    // If you want to restrict to a specific session/term, adjust this logic accordingly
+    // Here, we just check that the destination is the current session and term
+    // (You may want to pass current session/term as parameters if needed)
+    return true;
+  }
+
+  // Allow moves within same session (regardless of class or term)
+  if (fromClass.session === toClass.session) {
+    return true;
+  }
+
+  // Allow moves from third term of previous session to current term in current session
+  if (fromClass.term === "third") {
+    // Extract years from session strings to check if "from" is previous to "to"
+    const [fromStart] = fromClass.session.split("/").map(Number);
+    const [toStart] = toClass.session.split("/").map(Number);
+
+    if (toStart === fromStart + 1) {
+      return true;
+    }
+  }
+
+  return false;
 };

@@ -4,7 +4,6 @@ import BadRequestError from "../errors/bad-request.js";
 import NotFoundError from "../errors/not-found.js";
 import StudentAnswer from "../models/StudentAnswerModel.js";
 import Staff from "../models/StaffModel.js";
-import mongoose from "mongoose";
 import InternalServerError from "../errors/internal-server-error.js";
 
 // Create a grade
@@ -203,7 +202,7 @@ export const createGrade = async (req, res, next) => {
       populatedGrade,
     });
   } catch (error) {
-    console.error("Error creating test:", error);
+    console.log("Error creating test:", error);
     next(new InternalServerError(error.message));
   }
 };
@@ -385,20 +384,21 @@ export const getGrades = async (req, res, next) => {
       grades,
     });
   } catch (error) {
-    console.error("Error getting grade:", error);
+    console.log("Error getting grade:", error);
     next(new InternalServerError(error.message));
   }
 };
 
 // Get all grades for a specific student
-export const getGradesForStudent = async (req, res) => {
+export const getGradesForStudent = async (req, res, next) => {
   try {
     const grades = await Grade.find({ student: req.params.studentId }).populate(
       "student subject teacher",
     );
-    res.status(200).json(grades);
+    res.status(StatusCodes.OK).json(grades);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error("Error getting grades for student:", error);
+    next(new InternalServerError(error.message));
   }
 };
 
@@ -434,14 +434,17 @@ export const updateGrade = async (req, res, next) => {
 };
 
 // Delete a grade
-export const deleteGrade = async (req, res) => {
+export const deleteGrade = async (req, res, next) => {
   try {
     const grade = await Grade.findByIdAndDelete(req.params.id);
-    if (!grade) return res.status(404).json({ error: "Grade not found" });
-    res.status(200).json({ message: "Grade deleted successfully" });
+    if (!grade) {
+      throw new NotFoundError("Grade not found");
+    }
+
+    res.status(StatusCodes.OK).json({ message: "Grade deleted successfully" });
   } catch (error) {
-    console.error("Error deleting grade:", error);
-    res.status(500).json({ error: error.message });
+    console.log("Error deleting grade:", error);
+    next(new InternalServerError(error.message));
   }
 };
 

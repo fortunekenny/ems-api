@@ -24,7 +24,7 @@ router.get(
   subjectController.getSubjects,
 );
 router.get(
-  "/:id",
+  "/:subjectId",
   authenticateToken,
   authorizeRole("admin", "proprietor", "teacher"),
   checkStatus,
@@ -32,14 +32,23 @@ router.get(
 );
 
 router.patch(
-  "/:id",
+  "/:subjectId",
   authenticateToken,
   authorizeRole("admin", "proprietor"),
   checkStatus,
   subjectController.updateSubject,
 );
+
+router.patch(
+  "/:subjectId",
+  authenticateToken,
+  authorizeRole("admin", "proprietor"),
+  checkStatus,
+  subjectController.changeSubjectTeacher,
+);
+
 router.delete(
-  "/:id",
+  "/:subjectId",
   authenticateToken,
   authorizeRole("admin", "proprietor"),
   checkStatus,

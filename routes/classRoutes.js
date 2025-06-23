@@ -37,6 +37,7 @@ router.patch(
   checkStatus,
   classController.updateClass,
 );
+
 router.delete(
   "/:id",
   authenticateToken,

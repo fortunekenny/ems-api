@@ -1,4 +1,5 @@
 import ReportCard from "../models/ReportcardModel.js";
+import Student from "../models/StudentModel.js";
 import { StatusCodes } from "http-status-codes";
 import BadRequestError from "../errors/bad-request.js";
 import NotFoundError from "../errors/not-found.js";
@@ -15,6 +16,7 @@ import {
 const { session, term, endDate } = getCurrentTermDetails(
   startTermGenerationDate,
   holidayDurationForEachTerm,
+  //[] publicHolidays
 );
 
 // const endDate = Date.now() - 1000 * 60 * 60 * 24; // 1 day before now
@@ -22,9 +24,14 @@ const { session, term, endDate } = getCurrentTermDetails(
 // Create a report card
 export const createReportCard = async (req, res, next) => {
   try {
-    if (Date.now() < endDate) {
+    // Only allow report card creation within the last 2 days before endDate
+    const twoDaysBeforeEnd = new Date(endDate);
+    twoDaysBeforeEnd.setDate(twoDaysBeforeEnd.getDate() - 1);
+    if (Date.now() < twoDaysBeforeEnd) {
       throw new BadRequestError(
-        "You can not create report card until the last day of the term.",
+        `You can not create report card until the last 2 days of the term. Report card creation opens on ${twoDaysBeforeEnd.toDateString()} and term ends on ${new Date(
+          endDate,
+        ).toDateString()}.`,
       );
     }
 
@@ -42,21 +49,21 @@ export const createReportCard = async (req, res, next) => {
 
     const { id: userId, role: userRole } = req.user;
 
-    let subjectTeacherId;
+    let classTeacherId;
     let isAuthorized = false;
 
     if (["admin", "proprietor"].includes(userRole)) {
       isAuthorized = true;
-      subjectTeacherId = teacher;
+      classTeacherId = teacher;
 
-      // Ensure 'subjectTeacher' field is provided
-      if (!subjectTeacherId) {
+      // Ensure 'classTeacher' field is provided
+      if (!classTeacherId) {
         throw new BadRequestError(
           "For admin or proprietor, the 'teacher' field must be provided.",
         );
       }
 
-      const teacherData = await Staff.findById(subjectTeacherId).populate(
+      const teacherData = await Staff.findById(classTeacherId).populate(
         "isClassTeacher",
       );
       if (!teacherData || !teacherData.isClassTeacher.equals(classId)) {
@@ -212,6 +219,22 @@ export const createReportCard = async (req, res, next) => {
     });
     await reportCard.save();
 
+    // Update the student's academicRecords for this session/term/class to set reportCard
+    const studentDoc = await Student.findById(student);
+    if (studentDoc && Array.isArray(studentDoc.academicRecords)) {
+      const record = studentDoc.academicRecords.find(
+        (rec) =>
+          rec.session === session &&
+          rec.term === term &&
+          rec.classId &&
+          rec.classId.toString() === classId.toString(),
+      );
+      if (record) {
+        record.reportCard = reportCard._id;
+        await studentDoc.save();
+      }
+    }
+
     //Compute the student's position (ranking) based on overallPercentage.
     // Retrieve all report cards for the class, term, and session, sorted descending.
 
@@ -260,7 +283,7 @@ export const createReportCard = async (req, res, next) => {
       populatedReportCard,
     });
   } catch (error) {
-    console.error("Error creating report card:", error);
+    console.log("Error creating report card:", error);
     next(new InternalServerError(error.message));
   }
 };
@@ -269,13 +292,18 @@ export const createReportCardsForClass = async (req, res, next) => {
   try {
     // Validate term end: Ensure the current date is at or after the term end date.
     // endDate should be provided in req.body (as a string or date)
-    const { endDate } = req.body;
-    if (!endDate) {
-      throw new BadRequestError("Term end date must be provided.");
-    }
-    if (Date.now() < new Date(endDate)) {
+    // const { endDate } = req.body;
+    // if (!endDate) {
+    //   throw new BadRequestError("Term end date must be provided.");
+    // }
+    // Only allow report card creation within the last 2 days before endDate
+    const twoDaysBeforeEnd = new Date(endDate);
+    twoDaysBeforeEnd.setDate(twoDaysBeforeEnd.getDate() - 1);
+    if (Date.now() < twoDaysBeforeEnd) {
       throw new BadRequestError(
-        "You cannot create report cards until the last day of the term.",
+        `You can not create report card until the last 2 days of the term. Report card creation opens on ${twoDaysBeforeEnd.toDateString()} and term ends on ${new Date(
+          endDate,
+        ).toDateString()}.`,
       );
     }
 
@@ -294,17 +322,17 @@ export const createReportCardsForClass = async (req, res, next) => {
 
     // Authorization check: Only allow if the requester is an admin, proprietor, or the class teacher.
     const { id: userId, role: userRole } = req.user;
-    let subjectTeacherId;
+    let classTeacherId;
     let isAuthorized = false;
     if (["admin", "proprietor"].includes(userRole)) {
       isAuthorized = true;
-      subjectTeacherId = teacher;
-      if (!subjectTeacherId) {
+      classTeacherId = teacher;
+      if (!classTeacherId) {
         throw new BadRequestError(
           "For admin or proprietor, the 'teacher' field must be provided.",
         );
       }
-      const teacherData = await Staff.findById(subjectTeacherId).populate(
+      const teacherData = await Staff.findById(classTeacherId).populate(
         "isClassTeacher",
       );
       if (!teacherData || !teacherData.isClassTeacher.equals(classId)) {
@@ -315,12 +343,10 @@ export const createReportCardsForClass = async (req, res, next) => {
         "isClassTeacher",
       );
       if (!teacherData || !teacherData.isClassTeacher.equals(classId)) {
-        throw new BadRequestError(
-          "You are not authorized to create a report card.",
-        );
+        throw new BadRequestError("You are not the class teacher.");
       }
       isAuthorized = true;
-      subjectTeacherId = userId;
+      classTeacherId = userId;
     }
     if (!isAuthorized) {
       throw new BadRequestError(
@@ -480,6 +506,24 @@ export const createReportCardsForClass = async (req, res, next) => {
     // Insert all report cards at once.
     const createdReportCards = await ReportCard.insertMany(reportCardsToInsert);
 
+    // Update each student's academicRecords for this session/term/class to set reportCard
+    for (const rc of createdReportCards) {
+      const studentDoc = await Student.findById(rc.student);
+      if (studentDoc && Array.isArray(studentDoc.academicRecords)) {
+        const record = studentDoc.academicRecords.find(
+          (rec) =>
+            rec.session === rc.session &&
+            rec.term === rc.term &&
+            rec.classId &&
+            rec.classId.toString() === rc.classId.toString(),
+        );
+        if (record) {
+          record.reportCard = rc._id;
+          await studentDoc.save();
+        }
+      }
+    }
+
     // Now, compute positions based on overallPercentage.
     // Sort report cards in descending order (highest percentage first)
     const sortedReportCards = createdReportCards.sort(
@@ -520,7 +564,7 @@ export const createReportCardsForClass = async (req, res, next) => {
       reportCards: populatedReportCards,
     });
   } catch (error) {
-    console.error("Error creating report card:", error);
+    console.log("Error creating report card:", error);
     next(new InternalServerError(error.message));
   }
 };
@@ -691,22 +735,23 @@ export const getReportCards = async (req, res, next) => {
       reportCards,
     });
   } catch (error) {
-    console.error("Error getting report cards:", error);
+    console.log("Error getting report cards:", error);
     next(new InternalServerError(error.message));
   }
 };
 
 // Get all report cards for a specific student
-export const getReportCardsForStudent = async (req, res) => {
+export const getReportCardsForStudent = async (req, res, next) => {
   try {
     const reportCards = await ReportCard.find({
       student: req.params.studentId,
       session: req.query.session,
       term: req.query.term,
     }).populate("student class grades");
-    res.status(200).json(reportCards);
+    res.status(StatusCodes.OK).json(reportCards);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.log("Error getting report cards for student:", error);
+    next(new InternalServerError(error.message));
   }
 };
 
@@ -731,12 +776,13 @@ export const getReportCardById = async (req, res, next) => {
 
     res.status(StatusCodes.OK).json(reportCard);
   } catch (error) {
-    next(new BadRequestError(error.message));
+    console.log("Error getting report card by ID:", error);
+    next(new InternalServerError(error.message));
   }
 };
 
 // Update a report card
-export const updateReportCard = async (req, res) => {
+export const updateReportCard = async (req, res, next) => {
   try {
     const { grades, comments, session, term } = req.body;
     const updatedReportCard = await ReportCard.findByIdAndUpdate(
@@ -744,11 +790,13 @@ export const updateReportCard = async (req, res) => {
       { grades, comments, session, term },
       { new: true },
     );
-    if (!updatedReportCard)
-      return res.status(404).json({ error: "Report card not found" });
-    res.status(200).json(updatedReportCard);
+    if (!updatedReportCard) {
+      throw new NotFoundError("Report card not found");
+    }
+    res.status(StatusCodes.OK).json(updatedReportCard);
   } catch (error) {
-    res.status(400).json({ error: error.message });
+    console.log("Error updating report card:", error);
+    next(new InternalServerError(error.message));
   }
 };
 
@@ -775,6 +823,7 @@ export const deleteReportCard = async (req, res, next) => {
       .status(StatusCodes.OK)
       .json({ message: "Report card deleted successfully" });
   } catch (error) {
-    next(error);
+    console.log("Error deleting report card:", error);
+    next(new InternalServerError(error.message));
   }
 };

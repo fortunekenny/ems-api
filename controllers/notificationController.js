@@ -39,7 +39,7 @@ export const createNotification = async (req, res, next) => {
     await notification.save();
     res.status(StatusCodes.CREATED).json(notification);
   } catch (error) {
-    console.error("Error creating notification: ", error);
+    console.log("Error creating notification: ", error);
     next(new InternalServerError(error.message));
   }
 };
@@ -51,7 +51,7 @@ export const getAllNotifications = async (req, res, next) => {
       .status(StatusCodes.OK)
       .json({ count: notifications.length, notifications });
   } catch (error) {
-    console.error("Error getting notifications: ", error);
+    console.log("Error getting notifications: ", error);
     next(new InternalServerError(error.message));
   }
 };
@@ -529,7 +529,20 @@ export const sendBulkNotifications = async (options) => {
   }));
 
   // Bulk insert notifications
-  await Notification.insertMany(notifications);
+  const insertedNotifications = await Notification.insertMany(notifications);
+
+  // Push notification _id to each recipient's notifications array
+  for (let i = 0; i < recipients.length; i++) {
+    const { recipientId, recipientModel } = recipients[i];
+    const notificationId = insertedNotifications[i]._id;
+    if (recipientModel === "Staff") {
+      await Staff.findByIdAndUpdate(recipientId, { $push: { notifications: notificationId } });
+    } else if (recipientModel === "Student") {
+      await Student.findByIdAndUpdate(recipientId, { $push: { notifications: notificationId } });
+    } else if (recipientModel === "Parent") {
+      await Parent.findByIdAndUpdate(recipientId, { $push: { notifications: notificationId } });
+    }
+  }
 };
 
 /* 

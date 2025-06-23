@@ -134,12 +134,14 @@ if (process.env.NODE_ENV === "development") {
 const routesPath = path.join(__dirname, "routes"); // Adjust if necessary
 await loadRoutes(app, routesPath);
 
-// app.use("/api/v1/auth", authRoutes);
+/*
+app.use("/api/v1/auth", authRoutes);
 
-// Catch-all route for serving the frontend
-// app.get("*", (req, res) => {
-//   res.sendFile(path.resolve(__dirname, "./client/dist", "index.html"));
-// });
+ Catch-all route for serving the frontend
+ app.get("*", (req, res) => {
+   res.sendFile(path.resolve(__dirname, "./client/dist", "index.html"));
+ });
+*/
 
 // Error handling middlewares
 app.use(notFoundMiddleware);
@@ -192,4 +194,5 @@ const start = async () => {
     process.exit(1); // Exit the process with a failure code
   }
 };*/
+
 start();

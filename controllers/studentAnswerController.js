@@ -48,7 +48,7 @@ export const createStudentAnswer = async (req, res, next) => {
       if (evaluation) break;
     }
 
-    if (!evaluation) throw new NotFoundError("Evaluation not found.");
+    if (!evaluation) throw new NotFoundError(`Evaluation not found.`);
 
     const {
       subject,
@@ -258,6 +258,39 @@ export const createStudentAnswer = async (req, res, next) => {
     });
     await studentAnswer.save();
 
+    // Update student's academicRecords for the correct term/session/class
+    const studentDoc = await Student.findById(studentId);
+    if (studentDoc) {
+      // Find the correct academic record
+      const recordIndex = studentDoc.academicRecords.findIndex(
+        (rec) =>
+          rec.term === evaluation.term &&
+          rec.session === evaluation.session &&
+          rec.classId?.toString() === classId.toString()
+      );
+      if (recordIndex !== -1) {
+        if (evaluationType === "Assignment") {
+          studentDoc.academicRecords[recordIndex].assignments = [
+            ...(studentDoc.academicRecords[recordIndex].assignments || []),
+            studentAnswer._id,
+          ];
+        } else if (evaluationType === "ClassWork") {
+          studentDoc.academicRecords[recordIndex].classworks = [
+            ...(studentDoc.academicRecords[recordIndex].classworks || []),
+            studentAnswer._id,
+          ];
+        } else if (evaluationType === "Test") {
+          studentDoc.academicRecords[recordIndex].tests = [
+            ...(studentDoc.academicRecords[recordIndex].tests || []),
+            studentAnswer._id,
+          ];
+        } else if (evaluationType === "Exam") {
+          studentDoc.academicRecords[recordIndex].exam = studentAnswer._id;
+        }
+        await studentDoc.save();
+      }
+    }
+
     const populatedStudentAnswer = await StudentAnswer.findById(
       studentAnswer._id,
     ).populate([
@@ -272,7 +305,7 @@ export const createStudentAnswer = async (req, res, next) => {
       populatedStudentAnswer,
     });
   } catch (error) {
-    console.error("Error submitting student answer:", error);
+    console.log("Error submitting student answer:", error);
     next(new BadRequestError(error.message));
   }
 };

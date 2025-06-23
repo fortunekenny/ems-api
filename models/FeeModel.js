@@ -41,3 +41,30 @@ feeSchema.pre("save", function (next) {
 const Fee = mongoose.model("Fee", feeSchema);
 
 export default Fee;
+
+/* 
+
+{
+  "_id": "666a1b2c3d4e5f6789012345",
+  "student": "665f1a2b3c4d5e6789012345",
+  "amountDue": 50000,
+  "amountPaid": 20000,
+  "installments": [
+    {
+      "amount": 10000,
+      "datePaid": "2025-05-01T00:00:00.000Z"
+    },
+    {
+      "amount": 10000,
+      "datePaid": "2025-06-01T00:00:00.000Z"
+    }
+  ],
+  "dueDate": "2025-07-01T00:00:00.000Z",
+  "session": "2024/2025",
+  "term": "First",
+  "status": "Pending",
+  "createdAt": "2025-06-15T12:00:00.000Z",
+  "updatedAt": "2025-06-15T12:00:00.000Z",
+  "__v": 0
+}
+*/

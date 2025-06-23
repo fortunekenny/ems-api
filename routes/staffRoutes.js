@@ -23,7 +23,7 @@ router
 //   );
 
 router
-  .route("/:id")
+  .route("/:staffId")
   .get(
     [
       authenticateToken,
@@ -46,71 +46,35 @@ router
   );
 
 router
-  .route("/staff/:id/status")
+  .route("/:staffId/status")
   .patch(
     [authenticateToken, checkStatus, authorizeRole("admin", "proprietor")],
     staffController.updateStaffStatus,
   );
+
 router
-  .route("/staff/:id/verify")
+  .route("/:staffId/verify")
   .patch(
     [authenticateToken, checkStatus, authorizeRole("admin", "proprietor")],
     staffController.updateStaffVerification,
   );
 
-/*
-// Staff routes
-router.get(
-  "/",
-  authenticateToken,
-  checkStatus,
-  authorizeRole("admin"),
-  staffController.getStaff,
-);
+router
+  .route("/:staffId/classTeacher")
+  .patch(
+    [authenticateToken, checkStatus, authorizeRole("admin", "proprietor")],
+    staffController.changeClassTeacher,
+  );
 
-// DELETE all staff route (only admin can perform this)
-router.delete(
-  "/staff/all",
-  authenticateToken,
-  checkStatus,
-  authorizeRole("admin"),
-  staffController.deleteAllStaff,
-);
-
-// Route to get a single staff member by ID
-router.get(
-  "/:id",
-  authenticateToken,
-  checkStatus,
-  authorizeRole("admin", "staff"),
-  staffController.getStaffById,
-);
-
-// Route to update staff status (Admin Only)
-router.patch(
-  "/staff/:id/status",
-  authenticateToken,
-  checkStatus,
-  authorizeRole("admin"),
-  staffController.updateStaffStatus,
-);
-
-// Route to update a staff member
-router.patch(
-  "/:id",
-  authenticateToken,
-  checkStatus,
-  authorizeRole("admin"),
-  staffController.updateStaff,
-);
-
-// Route to delete a single staff member
-router.delete(
-  "/:id",
-  authenticateToken,
-  checkStatus,
-  authorizeRole("admin"),
-  staffController.deleteStaff,
-);*/
+router
+  .route("/rolloverTeacherRecords")
+  .post(
+    [
+      authenticateToken,
+      checkStatus,
+      authorizeRole("admin", "proprietor")
+    ],
+    staffController.rolloverTeacherRecords
+  );
 
 export default router;

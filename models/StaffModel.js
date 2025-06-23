@@ -3,7 +3,7 @@ import bcrypt from "bcryptjs"; // Import bcrypt for password hashing
 
 // Define the schema
 const staffSchema = new mongoose.Schema({
-  name: { type: String, required: true }, // Staff member's name
+  // name: { type: String, required: true }, // Staff member's name
   firstName: { type: String, required: true }, // Staff name at birth
   middleName: { type: String, required: true }, // Staff second name
   lastName: { type: String, required: true }, // Staff surname
@@ -23,13 +23,8 @@ const staffSchema = new mongoose.Schema({
     required: true,
   }, // Admin, teacher, or non-teacher roles. Input
   department: { type: String }, // Optional: For non-teaching staff or department-specific teachers. Input
-  subjects: [{ type: mongoose.Schema.Types.ObjectId, ref: "Subject" }], // Subjects assigned to teachers. Automated if isClassTeacher is inputted and input if teacher is subjects teacher
-  classes: [{ type: mongoose.Schema.Types.ObjectId, ref: "Class" }], // Classes assigned to teachers. Input if teacher is a subject teacher for more than 1 class
-  isClassTeacher: { type: mongoose.Schema.Types.ObjectId, ref: "Class" }, // Reference to the class they are class teacher of. Input if a class teacher
   status: { type: String, enum: ["active", "inactive"], default: "active" }, // Automated
   isVerified: { type: Boolean, default: false },
-  session: { type: String, required: false }, // Academic session. Automated
-  term: { type: String, required: false }, // e.g., First, Second, Third term. Automated
   dateOfBirth: {
     type: String, // Store date as a string to validate custom format
     required: [true, "Please provide date of birth"],
@@ -45,6 +40,24 @@ const staffSchema = new mongoose.Schema({
   },
   age: { type: Number, default: 0 }, // Age of staff
   gender: { type: String, enum: ["male", "female"], required: true }, // Gender: male or female
+  // Add notifications here
+  notifications: [
+    {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Notification",
+      required: false,
+    },
+  ],
+  teacherRcords: [
+    {
+      session: { type: String, required: false }, // Academic session. Automated
+      term: { type: String, required: false }, // e.g., First, Second, Third term. Automated
+      isClassTeacher: { type: mongoose.Schema.Types.ObjectId, ref: "Class" }, // Reference to the class they are class teacher of. Input if a class teacher
+      subjects: [{ type: mongoose.Schema.Types.ObjectId, ref: "Subject" }], // Subjects assigned to teachers. Automated if isClassTeacher is inputted and input if teacher is subjects teacher
+      classes: [{ type: mongoose.Schema.Types.ObjectId, ref: "Class" }], // Classes assigned to teachers. Input if teacher is a subject teacher for more than 1 class
+      students: [{ type: mongoose.Schema.Types.ObjectId, ref: "Student" }], // Students assigned to teachers. Input if teacher is a subject teacher for more than 1 class
+    },
+  ],
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now },
 });

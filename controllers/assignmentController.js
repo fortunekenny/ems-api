@@ -168,6 +168,22 @@ export const createAssignment = async (req, res, next) => {
     note.assignment = assignment._id;
     await note.save(); // Update the lesson note with the assignment ID
 
+    // Push assignment._id into each student's academicRecords.assignments for the correct session/term/class
+    const studentIds = assignment.students;
+    await Promise.all(
+      studentIds.map(async (studentId) => {
+        await Student.updateOne(
+          {
+            _id: studentId,
+            "academicRecords.session": session,
+            "academicRecords.term": term,
+            "academicRecords.classId": classId,
+          },
+          { $addToSet: { "academicRecords.$.assignments": assignment._id } },
+        );
+      }),
+    );
+
     // After assignment is saved, trigger notifications for the class.
     // await createNotificationForAssignment(assignment, req.user.userId);
 
@@ -209,6 +225,163 @@ export const createAssignment = async (req, res, next) => {
     next(new BadRequestError(error.message));
   }
 };
+
+/* export const createAssignment = async (req, res, next) => {
+  try {
+    const { lessonNote, questions, marksObtainable } = req.body;
+    const { id: userId, role: userRole } = req.user;
+
+    if (!questions || !Array.isArray(questions) || questions.length === 0) {
+      throw new BadRequestError(
+        "Questions must be provided and cannot be empty.",
+      );
+    }
+    if (!lessonNote) {
+      throw new BadRequestError("Lesson note must be provided.");
+    }
+
+    const note = await LessonNote.findById(lessonNote).populate(
+      "classId subject",
+    );
+    if (!note) {
+      throw new BadRequestError("Lesson note not found.");
+    }
+
+    const { classId, subject, topic, subTopic, lessonWeek } = note;
+    Object.assign(req.body, {
+      classId,
+      subject,
+      topic,
+      subTopic,
+      lessonWeek,
+    });
+
+    let isAuthorized = false;
+    let subjectTeacherId;
+
+    if (["admin", "proprietor"].includes(userRole)) {
+      subjectTeacherId = req.body.subjectTeacher;
+
+      if (!subjectTeacherId) {
+        throw new BadRequestError(
+          "For admin or proprietor, 'subjectTeacher' must be provided.",
+        );
+      }
+
+      const teacher = await Staff.findById(subjectTeacherId).populate(
+        "subjects",
+      );
+      if (!teacher) {
+        throw new NotFoundError("Provided subjectTeacher not found.");
+      }
+
+      const isAssigned = teacher.subjects.some(
+        (s) => s.toString() === subject._id.toString(),
+      );
+      if (!isAssigned) {
+        throw new BadRequestError(
+          "SubjectTeacher is not assigned to the selected subject.",
+        );
+      }
+
+      isAuthorized = true;
+    } else if (userRole === "teacher") {
+      const teacher = await Staff.findById(userId).populate("subjects");
+      if (!teacher) {
+        throw new BadRequestError("Teacher not found.");
+      }
+
+      isAuthorized = teacher.subjects.some(
+        (s) => s.toString() === subject._id.toString(),
+      );
+
+      if (!isAuthorized) {
+        throw new BadRequestError(
+          "You're not authorized to create this assignment.",
+        );
+      }
+
+      req.body.subjectTeacher = userId;
+      subjectTeacherId = userId;
+    }
+
+    if (!isAuthorized) {
+      throw new BadRequestError(
+        "You are not authorized to create this assignment.",
+      );
+    }
+
+    const questionDocs = await Question.find({ _id: { $in: questions } });
+    if (questionDocs.length !== questions.length) {
+      throw new BadRequestError("Some questions could not be found.");
+    }
+
+    for (const [i, q] of questionDocs.entries()) {
+      if (
+        q.subject.toString() !== subject._id.toString() ||
+        q.classId.toString() !== classId._id.toString()
+      ) {
+        throw new BadRequestError(
+          `Question at index ${i + 1} doesn't match class or subject.`,
+        );
+      }
+    }
+
+    const classData = await Class.findById(classId).populate("students");
+    if (!classData || !classData.students.length) {
+      throw new BadRequestError("Class or students not found.");
+    }
+
+    req.body.students = classData.students.map((s) => s._id);
+    req.body.submitted = [];
+
+    const assignment = new Assignment(req.body);
+    await assignment.save();
+
+    note.assignment = assignment._id;
+    await note.save();
+
+    const notificationTitle = `New Assignment - Week ${lessonWeek}`;
+    const notificationMessage = `You have a new assignment on "${topic}" - ${subTopic}. Check your portal.`;
+
+    const recipients = classData.students.map((student) => ({
+      recipientId: student._id,
+      recipientModel: "Student",
+    }));
+
+    await sendBulkNotifications({
+      sender: userId,
+      title: notificationTitle,
+      message: notificationMessage,
+      metadata: {
+        broadcastId: new mongoose.Types.ObjectId(),
+        assignmentId: assignment._id,
+      },
+      recipients,
+    });
+
+    const populatedAssignment = await Assignment.findById(
+      assignment._id,
+    ).populate([
+      {
+        path: "questions",
+        select: "_id questionType questionText options files",
+      },
+      { path: "classId", select: "_id className" },
+      { path: "subject", select: "_id subjectName" },
+      { path: "subjectTeacher", select: "_id firstName" },
+      { path: "lessonNote", select: "_id lessonWeek lessonPeriod" },
+    ]);
+
+    res.status(StatusCodes.CREATED).json({
+      message: "Assignment created successfully",
+      populatedAssignment,
+    });
+  } catch (error) {
+    console.error("Error creating assignment:", error);
+    next(new BadRequestError(error.message));
+  }
+}; */
 
 // Get all assignments
 
@@ -411,87 +584,192 @@ export const getAssignments = async (req, res, next) => {
       assignments,
     });
   } catch (error) {
-    console.error("Error getting assignments:", error);
+    console.log("Error getting assignments:", error);
     next(new InternalServerError(error.message));
   }
 };
 
 /* export const getAssignments = async (req, res, next) => {
   try {
+    // Allowed query params
+    const allowedFilters = [
+      "subjectTeacher",
+      "subject",
+      "classId",
+      "lessonWeek",
+      "topic",
+      "sort",
+      "page",
+      "limit",
+    ];
+
+    const providedFilters = Object.keys(req.query);
+    const unknownFilters = providedFilters.filter(
+      (key) => !allowedFilters.includes(key),
+    );
+
+    if (unknownFilters.length > 0) {
+      throw new BadRequestError(
+        `Unknown query parameter(s): ${unknownFilters.join(", ")}`,
+      );
+    }
+
     const {
       subjectTeacher,
       subject,
       classId,
-      evaluationType,
-      term,
-      session,
       lessonWeek,
       topic,
+      sort,
+      page,
+      limit,
     } = req.query;
 
-    // Build a query object based on provided filters
-    const queryObject = {};
+    const matchStage = {};
+    if (lessonWeek) matchStage.lessonWeek = Number(lessonWeek);
+    if (topic) matchStage.topic = { $regex: topic, $options: "i" };
 
-    //queryObject["student.name"] = { $regex: name, $options: "i" }; // Case-insensitive search
+    const pipeline = [{ $match: matchStage }];
+
+    // Lookups
+    pipeline.push(
+      {
+        $lookup: {
+          from: "staffs",
+          localField: "subjectTeacher",
+          foreignField: "_id",
+          as: "subjectTeacherData",
+        },
+      },
+      {
+        $unwind: {
+          path: "$subjectTeacherData",
+          preserveNullAndEmptyArrays: true,
+        },
+      },
+      {
+        $lookup: {
+          from: "subjects",
+          localField: "subject",
+          foreignField: "_id",
+          as: "subjectData",
+        },
+      },
+      { $unwind: { path: "$subjectData", preserveNullAndEmptyArrays: true } },
+      {
+        $lookup: {
+          from: "classes",
+          localField: "classId",
+          foreignField: "_id",
+          as: "classData",
+        },
+      },
+      { $unwind: { path: "$classData", preserveNullAndEmptyArrays: true } },
+    );
+
+    // Filter by joined data
+    const orConditions = [];
 
     if (subjectTeacher) {
-      queryObject["subjectTeacher"] = { $regex: subjectTeacher, $options: "i" }; // Case-insensitive search
+      const regex = new RegExp(`^${subjectTeacher}$`, "i");
+      orConditions.push(
+        { "subjectTeacherData.firstName": regex },
+        { "subjectTeacherData.middleName": regex },
+        { "subjectTeacherData.lastName": regex },
+      );
     }
+
     if (subject) {
-      queryObject["subject"] = subject;
+      const regex = new RegExp(`^${subject}$`, "i");
+      orConditions.push(
+        { "subjectData.subjectName": regex },
+        { "subjectData.subjectCode": regex },
+      );
     }
-    if (evaluationType) {
-      queryObject["evaluationType"] = evaluationType;
-    }
+
     if (classId) {
-      queryObject["classId"] = classId;
-    }
-    if (lessonWeek) {
-      queryObject["lessonWeek"] = lessonWeek;
-    }
-    if (topic) {
-      queryObject["topic"] = topic;
-    }
-    if (term) {
-      queryObject["term"] = term;
-    }
-    if (session) {
-      queryObject["session"] = session;
+      orConditions.push({
+        "classData.className": new RegExp(`^${classId}$`, "i"),
+      });
     }
 
-    const assignments = await Assignment.find(queryObject).populate([
-      {
-        path: "questions",
-        select: "_id questionType questionText options files",
-      },
-      {
-        path: "classId",
-        select: "_id className",
-      },
-      {
-        path: "subject",
-        select: "_id subjectName",
-      },
-      {
-        path: "subjectTeacher",
-        select: "_id firstName",
-      },
-      {
-        path: "lessonNote",
-        select: "_id lessonweek lessonPeriod",
-      },
-    ]);
+    if (orConditions.length > 0) {
+      pipeline.push({ $match: { $or: orConditions } });
+    }
 
-    res.status(StatusCodes.OK).json({ count: assignments.length, assignments });
+    // Sorting
+    const sortOptions = {
+      newest: { createdAt: -1 },
+      oldest: { createdAt: 1 },
+      "a-z": { "subjectData.subjectName": 1 },
+      "z-a": { "subjectData.subjectName": -1 },
+    };
+    pipeline.push({ $sort: sortOptions[sort] || sortOptions.newest });
+
+    // Pagination
+    const pageNumber = Number(page) || 1;
+    const limitNumber = Number(limit) || 10;
+    pipeline.push({ $skip: (pageNumber - 1) * limitNumber });
+    pipeline.push({ $limit: limitNumber });
+
+    // Projection
+    pipeline.push({
+      $project: {
+        _id: 1,
+        // evaluationType: 1,
+        lessonWeek: 1,
+        topic: 1,
+        subTopic: 1,
+        marksObtainable: 1,
+        createdAt: 1,
+        numberOfQuestions: { $size: "$questions" },
+        numberOfSubmissions: { $size: "$submitted" },
+        subjectTeacher: {
+          _id: "$subjectTeacherData._id",
+          firstName: "$subjectTeacherData.firstName",
+          lastName: "$subjectTeacherData.lastName",
+        },
+        subject: {
+          _id: "$subjectData._id",
+          subjectName: "$subjectData.subjectName",
+          subjectCode: "$subjectData.subjectCode",
+        },
+        classId: {
+          _id: "$classData._id",
+          className: "$classData.className",
+        },
+      },
+    });
+
+    const assignments = await Assignment.aggregate(pipeline);
+
+    // Count total (exclude pagination stages)
+    const countPipeline = pipeline.filter(
+      (stage) =>
+        !(stage.$skip || stage.$limit || stage.$sort || stage.$project),
+    );
+    countPipeline.push({ $count: "total" });
+    const countResult = await Assignment.aggregate(countPipeline);
+    const totalAssignments = countResult[0]?.total || 0;
+    const numOfPages = Math.ceil(totalAssignments / limitNumber);
+
+    res.status(StatusCodes.OK).json({
+      count: totalAssignments,
+      numOfPages,
+      currentPage: pageNumber,
+      assignments,
+    });
   } catch (error) {
-    next(new BadRequestError(error.message));
+    console.log("Error getting assignments:", error);
+    next(new InternalServerError(error.message));
   }
 }; */
 
 // Get assignment by ID
 export const getAssignmentById = async (req, res, next) => {
   try {
-    const assignment = await Assignment.findById(req.params.id).populate([
+    const assignment = await Assignment.findById(req.params.id);
+    /*     .populate([
       { path: "questions", select: "_id questionType questionText options" },
       {
         path: "classId",
@@ -509,7 +787,7 @@ export const getAssignmentById = async (req, res, next) => {
         path: "lessonNote",
         select: "_id lessonweek lessonPeriod",
       },
-    ]);
+    ]); */
 
     if (!assignment) {
       throw new NotFoundError("Assignment not found.");
@@ -667,6 +945,146 @@ export const updateAssignment = async (req, res) => {
   }
 };
 
+/* export const updateAssignment = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { id: userId, role: userRole } = req.user; // Authenticated user ID and role
+
+    const assignment = await Assignment.findById(id).populate("lessonNote");
+    if (!assignment) {
+      throw new NotFoundError("Assignment not found");
+    }
+
+    const { subject, questions, classId, marksObtainable } = assignment; // removed term, session
+
+    let subjectTeacherId;
+    let isAuthorized = false;
+
+    if (["admin", "proprietor"].includes(userRole)) {
+      isAuthorized = true;
+      subjectTeacherId = req.body.subjectTeacher;
+
+      // Ensure 'subjectTeacher' field is provided
+      if (!subjectTeacherId) {
+        throw new BadRequestError(
+          "For admin or proprietor, the 'subjectTeacher' field must be provided.",
+        );
+      }
+
+      const teacher = await Staff.findById(subjectTeacherId).populate([
+        { path: "subjects", select: "_id subjectName" },
+      ]);
+      if (!teacher) {
+        throw new NotFoundError("Provided subjectTeacher not found.");
+      }
+
+      const isAssignedSubject = teacher.subjects.some(
+        (subjectItem) => subjectItem && subjectItem.equals(subject),
+      );
+
+      if (!isAssignedSubject) {
+        throw new BadRequestError(
+          "The specified subjectTeacher is not assigned to the selected subject.",
+        );
+      }
+    } else if (userRole === "teacher") {
+      const teacher = await Staff.findById(userId).populate("subjects");
+      if (!teacher) {
+        throw new NotFoundError("Teacher not found.");
+      }
+
+      // Check if the teacher is authorized for this assignment's subject
+      isAuthorized = teacher.subjects.some(
+        (subjectItem) => subjectItem.toString() === subject.toString(),
+      );
+
+      if (!isAuthorized) {
+        throw new BadRequestError(
+          "You are not authorized to update this assignment for the selected subject.",
+        );
+      }
+
+      subjectTeacherId = userId;
+    }
+
+    if (!isAuthorized) {
+      throw new BadRequestError(
+        "You are not authorized to update this assignment.",
+      );
+    }
+
+    // Fetch and validate questions
+    const questionDocs = await Question.find({ _id: { $in: questions } });
+
+    if (questionDocs.length !== questions.length) {
+      throw new BadRequestError("Some questions could not be found.");
+    }
+
+    for (const [index, question] of questionDocs.entries()) {
+      if (
+        question.subject.toString() !== subject.toString() ||
+        question.classId.toString() !== classId.toString()
+      ) {
+        throw new BadRequestError(
+          `Question at index ${index + 1} does not match the class or subject.`,
+        );
+      }
+    }
+
+    const updatedAssignment = await Assignment.findByIdAndUpdate(id, req.body, {
+      new: true,
+      runValidators: true,
+    }).populate([
+      {
+        path: "questions",
+        select: "_id questionType questionText options files",
+      },
+      { path: "classId", select: "_id className" },
+      { path: "subject", select: "_id subjectName" },
+      { path: "subjectTeacher", select: "_id firstName" },
+      {
+        path: "lessonNote",
+        select: "_id lessonWeek lessonPeriod",
+      },
+    ]);
+
+    const subjectData = await Subject.findById(subject);
+
+    if (!subjectData) {
+      throw new NotFoundError("Subject not found.");
+    }
+
+    const notificationTitle = `Assignment updated`;
+
+    const notificationMessage = `The ${subjectData.subjectName} assignment for week ${assignment.lessonWeek} on the topic: ${assignment.topic}, subtopic: ${assignment.subTopic}, has been updated. Please check your portal for details `;
+
+    const recipients = [
+      ...assignment.students.map((student) => ({
+        recipientId: student._id,
+        recipientModel: "Student",
+      })),
+    ];
+
+    await sendBulkNotifications({
+      sender: req.user.userId,
+      title: notificationTitle,
+      message: notificationMessage,
+      metadata: {
+        broadcastId: new mongoose.Types.ObjectId(),
+        assignmentId: id,
+      },
+      recipients: recipients,
+    });
+
+    res.status(StatusCodes.OK).json({
+      message: "Assignment updated successfully.",
+      updatedAssignment,
+    });
+  } catch (error) {
+    next(new BadRequestError(error.message));
+  }
+}; */
+
 export const submitAssignment = async (req, res, next) => {
   try {
     const { id } = req.params;
@@ -742,115 +1160,6 @@ export const submitAssignment = async (req, res, next) => {
     next(new BadRequestError(error.message));
   }
 };
-
-// Delete an assignment
-/* export const deleteAssignment = async (req, res, next) => {
-  try {
-    const { id } = req.params; // Assignment ID to be deleted
-
-    // Find the Assignment document
-    const assignment = await Assignment.findById(id);
-    if (!assignment) {
-      throw new NotFoundError("Assignment not found.");
-    }
-
-    const { lessonNote } = assignment; // Extract the lessonNote reference
-    // console.log(lessonNote);
-
-    // Find the associated LessonNote document
-    const lessonNoteDoc = await LessonNote.findById(lessonNote);
-    if (!lessonNoteDoc) {
-      throw new NotFoundError("Associated lessonNote not found.");
-    }
-
-    // console.log(lessonNoteDoc);
-
-    // Remove the assignment reference from the LessonNote
-    /* lessonNoteDoc.assignment = lessonNoteDoc.assignment.filter(
-      (assignId) => !assignId.equals(id), // Filter out the current assignment ID
-    ); 
-
-    if (Array.isArray(lessonNoteDoc.assignment)) {
-      // If it's an array, filter out the assignment.
-      lessonNoteDoc.assignment = lessonNoteDoc.assignment.filter(
-        (assignId) => !assignId.equals(id),
-      );
-    } else {
-      // If it's not an array, check if it matches the id.
-      if (lessonNoteDoc.assignment && lessonNoteDoc.assignment.equals(id)) {
-        lessonNoteDoc.assignment = null;
-      }
-    }
-
-    await lessonNoteDoc.save();
-
-    // Delete the Assignment document
-    await Assignment.findByIdAndDelete(id);
-
-    res
-      .status(StatusCodes.OK)
-      .json({ message: "Assignment deleted successfully." });
-  } catch (error) {
-    next(new BadRequestError(error.message));
-  }
-}; */
-
-/* export const deleteAssignment = async (req, res, next) => {
-  try {
-    const { id } = req.params; // Assignment ID to be deleted
-    if (!id) {
-      throw new BadRequestError("Assignment ID is required.");
-    }
-
-    // Find the Assignment document
-    const assignment = await Assignment.findById(id);
-    if (!assignment) {
-      throw new NotFoundError("Assignment not found.");
-    }
-
-    // Extract the lessonNote reference from the assignment
-    const { lessonNote } = assignment;
-    if (!lessonNote) {
-      throw new NotFoundError("Assignment does not reference any lesson note.");
-    }
-
-    // Find the associated LessonNote document
-    const lessonNoteDoc = await LessonNote.findById(lessonNote);
-    if (!lessonNoteDoc) {
-      throw new NotFoundError("Associated lesson note not found.");
-    }
-
-    // Remove the assignment reference from the lesson note.
-    // If the assignment field is an array, filter out the given assignment ID;
-    // otherwise, if it's a single ObjectId and it matches, set it to null.
-    /*     if (Array.isArray(lessonNoteDoc.assignment)) {
-      lessonNoteDoc.assignment = lessonNoteDoc.assignment.filter(
-        (assignId) => !assignId.equals(id),
-      );
-    } else if (
-      lessonNoteDoc.assignment &&
-      lessonNoteDoc.assignment.equals(id)
-    ) {
-      lessonNoteDoc.assignment = null;
-    } 
-
-    if (lessonNoteDoc.assignment && lessonNoteDoc.assignment.equals(id)) {
-      lessonNoteDoc.assignment = null;
-    }
-
-    // Save the updated lesson note document
-    await lessonNoteDoc.save();
-
-    // Delete the Assignment document
-    await Assignment.findByIdAndDelete(id);
-
-    res
-      .status(StatusCodes.OK)
-      .json({ message: "Assignment deleted successfully." });
-  } catch (error) {
-    next(new BadRequestError(error.message));
-  }
-}; */
 
 export const deleteAssignment = async (req, res, next) => {
   try {

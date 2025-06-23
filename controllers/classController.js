@@ -6,23 +6,15 @@ import InternalServerError from "../errors/internal-server-error.js";
 import Class from "../models/ClassModel.js";
 import checkPermissions from "../utils/checkPermissions.js";
 import {
-  generateCurrentTerm,
-  holidayDurationForEachTerm,
+  getCurrentTermDetails,
   startTermGenerationDate,
+  holidayDurationForEachTerm,
 } from "../utils/termGenerator.js"; // Import the term generation function
 
 // Create a new class
-export const createClass = async (req, res) => {
+export const createClass = async (req, res, next) => {
   try {
-    const {
-      className,
-      section,
-      classTeacher,
-      subjectTeachers,
-      subjects,
-      session,
-      timetable,
-    } = req.body;
+    const { className, section } = req.body;
 
     // Check if class already exists
     const classAlreadyExists = await Class.findOne({ className });
@@ -30,20 +22,12 @@ export const createClass = async (req, res) => {
       throw new BadRequestError("Class already exists");
     }
 
-    const term = generateCurrentTerm(
-      startTermGenerationDate,
-      holidayDurationForEachTerm,
-    );
-
     const newClass = new Class({
       className,
       section,
-      classTeacher,
-      subjectTeachers,
-      subjects,
-      session,
-      term,
-      timetable,
+      subjectTeachers: [],
+      students: [],
+      subjects: [],
     });
     await newClass.save();
 
@@ -52,7 +36,8 @@ export const createClass = async (req, res) => {
       newClass,
     });
   } catch (error) {
-    res.status(StatusCodes.BAD_REQUEST).json({ error: error.message });
+    console.log("Error in creating class", error);
+    next(new InternalServerError(error.message));
   }
 };
 
@@ -85,15 +70,35 @@ export const getClasses = async (req, res, next) => {
       );
     }
 
-    const { className, classTeacher, term, session, sort, page, limit } =
-      req.query;
-
-    const matchStage = {};
-
-    if (term) matchStage.term = { $regex: term, $options: "i" };
-    if (session) matchStage.session = session;
-    if (className) matchStage.className = className;
-    // if (topic) matchStage.topic = { $regex: topic, $options: "i" };
+    // If no query parameters are provided, return all classes (no filter)
+    const hasFilters = providedFilters.some((key) =>
+      allowedFilters.includes(key),
+    );
+    let matchStage = {};
+    let classTeacher = undefined;
+    let sort, page, limit;
+    if (hasFilters) {
+      const {
+        className: qClassName,
+        classTeacher: qClassTeacher,
+        term,
+        session,
+        sort: qSort,
+        page: qPage,
+        limit: qLimit,
+      } = req.query;
+      if (term) matchStage.term = { $regex: term, $options: "i" };
+      if (session) matchStage.session = session;
+      if (qClassName) matchStage.className = qClassName;
+      if (qClassTeacher) classTeacher = qClassTeacher;
+      sort = qSort;
+      page = qPage;
+      limit = qLimit;
+    }
+    // Provide default values if not set
+    sort = sort || "newest";
+    page = Number(page) || 1;
+    limit = Number(limit) || 10;
 
     const pipeline = [];
     pipeline.push({ $match: matchStage });
@@ -107,7 +112,39 @@ export const getClasses = async (req, res, next) => {
         as: "classTeacherData",
       },
     });
-    pipeline.push({ $unwind: "$classTeacherData" });
+    pipeline.push({
+      $unwind: {
+        path: "$classTeacherData",
+        preserveNullAndEmptyArrays: true,
+      },
+    });
+    // Lookup for subjectTeachers
+    pipeline.push({
+      $lookup: {
+        from: "staffs",
+        localField: "subjectTeachers",
+        foreignField: "_id",
+        as: "subjectTeachersData",
+      },
+    });
+    // Lookup for students
+    pipeline.push({
+      $lookup: {
+        from: "students",
+        localField: "students",
+        foreignField: "_id",
+        as: "studentsData",
+      },
+    });
+    // Lookup for subjects
+    pipeline.push({
+      $lookup: {
+        from: "subjects",
+        localField: "subjects",
+        foreignField: "_id",
+        as: "subjectsData",
+      },
+    });
 
     const joinMatch = {};
 
@@ -143,10 +180,8 @@ export const getClasses = async (req, res, next) => {
     const sortKey = sortOptions[sort] || sortOptions.newest;
     pipeline.push({ $sort: sortKey });
 
-    const pageNumber = Number(page) || 1;
-    const limitNumber = Number(limit) || 10;
-    pipeline.push({ $skip: (pageNumber - 1) * limitNumber });
-    pipeline.push({ $limit: limitNumber });
+    pipeline.push({ $skip: (page - 1) * limit });
+    pipeline.push({ $limit: limit });
 
     // Projection stage: structure the output.
     pipeline.push({
@@ -160,6 +195,39 @@ export const getClasses = async (req, res, next) => {
           _id: "$classTeacherData._id",
           firstName: "$classTeacherData.firstName",
           lastName: "$classTeacherData.lastName",
+        },
+        subjectTeachers: {
+          $map: {
+            input: "$subjectTeachersData",
+            as: "teacher",
+            in: {
+              _id: "$$teacher._id",
+              firstName: "$$teacher.firstName",
+              lastName: "$$teacher.lastName",
+            },
+          },
+        },
+        students: {
+          $map: {
+            input: "$studentsData",
+            as: "student",
+            in: {
+              _id: "$$student._id",
+              firstName: "$$student.firstName",
+              lastName: "$$student.lastName",
+            },
+          },
+        },
+        subjects: {
+          $map: {
+            input: "$subjectsData",
+            as: "subject",
+            in: {
+              _id: "$$subject._id",
+              subjectName: "$$subject.subjectName",
+              subjectCode: "$$subject.subjectCode",
+            },
+          },
         },
       },
     });
@@ -184,12 +252,12 @@ export const getClasses = async (req, res, next) => {
 
     const totalClasses = countResult[0] ? countResult[0].total : 0;
 
-    const numOfPages = Math.ceil(totalClasses / limitNumber);
+    const numOfPages = Math.ceil(totalClasses / limit);
 
     res.status(StatusCodes.OK).json({
       count: totalClasses,
       numOfPages,
-      currentPage: pageNumber,
+      currentPage: page,
       classes,
     });
   } catch (error) {
@@ -199,7 +267,7 @@ export const getClasses = async (req, res, next) => {
 };
 
 // Get class by ID
-export const getClassById = async (req, res) => {
+export const getClassById = async (req, res, next) => {
   try {
     const { id: classId } = req.params;
 
@@ -219,14 +287,12 @@ export const getClassById = async (req, res) => {
     }
     res.status(StatusCodes.OK).json(classData);
   } catch (error) {
-    res
-      .status(StatusCodes.INTERNAL_SERVER_ERROR)
-      .json({ message: error.message });
+    console.log("Error getting class by ID:", error);
+    next(new InternalServerError(error.message));
   }
 };
-
 // Update class
-export const updateClass = async (req, res) => {
+export const updateClass = async (req, res, next) => {
   try {
     const { id: classId } = req.params;
     const {
@@ -247,7 +313,7 @@ export const updateClass = async (req, res) => {
       throw new NotFoundError(`No class found with id: ${classId}`);
     }
 
-    const term = generateCurrentTerm(
+    const term = getCurrentTermDetails(
       startTermGenerationDate,
       holidayDurationForEachTerm,
     );
@@ -299,14 +365,13 @@ export const updateClass = async (req, res) => {
 
     res.status(StatusCodes.OK).json(updatedClass);
   } catch (error) {
-    res
-      .status(StatusCodes.INTERNAL_SERVER_ERROR)
-      .json({ message: error.message });
+    console.log("Error in updating class", error);
+    next(new InternalServerError(error.message));
   }
 };
 
 // Delete class
-export const deleteClass = async (req, res) => {
+export const deleteClass = async (req, res, next) => {
   try {
     const { id: classId } = req.params;
     const classToDelete = await Class.findOne({ _id: classId });
@@ -323,8 +388,62 @@ export const deleteClass = async (req, res) => {
     await classToDelete.deleteOne();
     res.status(StatusCodes.OK).json({ message: "Class deleted successfully" });
   } catch (error) {
-    res
-      .status(StatusCodes.INTERNAL_SERVER_ERROR)
-      .json({ message: error.message });
+    console.log("Error in deleting class", error);
+    next(new InternalServerError(error.message));
+  }
+};
+
+// Controller to create a new class for a new term and/or session
+export const createClassForNewTermOrSession = async (req, res, next) => {
+  try {
+    const { className, section } = req.body;
+
+    // Get current term/session details
+    const termDetails = getCurrentTermDetails(
+      startTermGenerationDate,
+      holidayDurationForEachTerm,
+    );
+
+    let { term, session, isHoliday, nextTerm, nextSession } = termDetails;
+
+    // If it's a holiday, use nextTerm and/or nextSession
+    if (isHoliday) {
+      term = nextTerm;
+      session = nextSession;
+    }
+
+    // Check if class already exists for this term and session
+    const classExists = await Class.findOne({
+      className,
+      term,
+      session,
+    });
+    if (classExists) {
+      throw new BadRequestError(
+        `Class "${className}" already exists for term "${term}" and session "${session}".`,
+      );
+    }
+
+    // Create the new class
+    const newClass = new Class({
+      className,
+      section,
+      classTeacher: null, // Assuming no class teacher for
+      subjectTeachers: [],
+      subjects: [],
+      students: [],
+      session,
+      term,
+      timetable: null, // Assuming no timetable for new class creation
+    });
+    await newClass.save();
+
+    res.status(StatusCodes.CREATED).json({
+      message: "Class created for new term/session successfully",
+      newClass,
+    });
+  } catch (error) {
+    console.log("Error creating class for new term/session:", error);
+    next(new InternalServerError(error.message));
   }
 };

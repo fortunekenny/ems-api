@@ -13,6 +13,7 @@ import {
 } from "../utils/termGenerator.js";
 import generateID from "../utils/generateId.js";
 import calculateAge from "../utils/ageCalculate.js";
+import InternalServerError from "../errors/internal-server-error.js";
 
 // Helper function to validate term and session consistency
 const isValidTermAndSession = (subject, term, session) =>
@@ -95,6 +96,10 @@ const assignSubjectTeacherAndUpdateClass = async (
 
     // Add the teacher to the class's subjectTeachers list if not already there
     const assignedClass = await Class.findById(classId);
+    // Ensure subjectTeachers is always an array
+    if (!Array.isArray(assignedClass.subjectTeachers)) {
+      assignedClass.subjectTeachers = [];
+    }
     if (!assignedClass.subjectTeachers.includes(staff._id)) {
       assignedClass.subjectTeachers.push(staff._id);
     }
@@ -104,7 +109,7 @@ const assignSubjectTeacherAndUpdateClass = async (
   }
 };
 
-export const registerStaff = async (req, res) => {
+export const registerStaff = async (req, res, next) => {
   const {
     firstName,
     middleName,
@@ -137,7 +142,6 @@ export const registerStaff = async (req, res) => {
     !townOrCity ||
     !dateOfBirth ||
     !phoneNumber ||
-    !age ||
     !gender
   ) {
     throw new BadRequestError("Please provide all required fields.");
@@ -173,37 +177,57 @@ export const registerStaff = async (req, res) => {
       role,
       employeeID: await generateID("EMP", firstName, middleName, lastName),
       department,
-      subjects,
-      classes,
-      term,
-      session,
-      isClassTeacher,
+      status: "active",
+      isVerified: false,
+      notifications: [],
+      teacherRcords: [
+        {
+          session,
+          term,
+          isClassTeacher: isClassTeacher || undefined,
+          subjects: Array.isArray(subjects) ? subjects : [],
+          classes: Array.isArray(classes) ? classes : [],
+          students: [],
+        },
+      ],
     });
 
+    // Ensure staff.teacherRcords is an array
+    if (!Array.isArray(staff.teacherRcords)) staff.teacherRcords = [];
+
     // Handle class teacher assignment and subject update
-    if (role === "teacher" && isClassTeacher) {
+    if (isClassTeacher) {
       const assignedClass = await Class.findById(isClassTeacher);
       if (!assignedClass) {
         throw new BadRequestError("Assigned class not found for class teacher");
       }
-
-      assignedClass.classTeacher = staff._id; // Assign the teacher as class teacher
-      staff.isClassTeacher = assignedClass._id; // Update staff's isClassTeacher field
-
-      // Add classId to staff.classes if not already present
-      const classId = assignedClass._id.toString();
-      if (!staff.classes.includes(classId)) {
-        staff.classes.push(classId);
+      assignedClass.classTeacher = staff._id;
+      // Add staff _id to the class's subjectTeachers list if not already present
+      // Ensure subjectTeachers is always an array
+      if (!Array.isArray(assignedClass.subjectTeachers)) {
+        assignedClass.subjectTeachers = [];
       }
-
-      await assignedClass.save(); // Save the updated class
+      if (
+        !assignedClass.subjectTeachers
+          .map(String)
+          .includes(staff._id.toString())
+      ) {
+        assignedClass.subjectTeachers.push(staff._id);
+      }
+      staff.teacherRcords[0].isClassTeacher = assignedClass._id;
+      // Add classId to teacherRcords[0].classes if not already present
+      const classId = assignedClass._id.toString();
+      if (!staff.teacherRcords[0].classes.map(String).includes(classId)) {
+        staff.teacherRcords[0].classes.push(classId);
+      }
+      await assignedClass.save();
 
       // Update attendance records for the assigned class from the current date onward
       const attendanceUpdateResult = await Attendance.updateMany(
         {
           classId: isClassTeacher,
           term: term,
-          session: staff.session,
+          session: session, // Fix: use the correct session variable
           date: { $gte: new Date() }, // Apply to current and future dates
         },
         { $set: { classTeacher: staff._id } },
@@ -217,7 +241,7 @@ export const registerStaff = async (req, res) => {
       const classSubjects = await Subject.find({
         classId: isClassTeacher,
         term: term,
-        session: staff.session,
+        session: session, // Fix: use the correct session variable
       });
 
       // Assign subjects to the teacher and update staff classes/subjects
@@ -239,12 +263,26 @@ export const registerStaff = async (req, res) => {
       for (const subjectId of subjects) {
         const assignedSubject = await Subject.findById(subjectId);
         if (assignedSubject) {
-          await assignSubjectTeacherAndUpdateClass(
-            assignedSubject,
-            staff,
-            term,
-            staff.session,
-          );
+          // Add staff _id to subject's subjectTeachers if not already present
+          if (
+            !assignedSubject.subjectTeachers
+              .map(String)
+              .includes(staff._id.toString())
+          ) {
+            assignedSubject.subjectTeachers.push(staff._id);
+            await assignedSubject.save();
+          }
+          // Add staff _id to the class's subjectTeachers if not already present
+          const subjectClass = await Class.findById(assignedSubject.classId);
+          if (
+            subjectClass &&
+            !subjectClass.subjectTeachers
+              .map(String)
+              .includes(staff._id.toString())
+          ) {
+            subjectClass.subjectTeachers.push(staff._id);
+            await subjectClass.save();
+          }
         }
       }
 
@@ -258,12 +296,17 @@ export const registerStaff = async (req, res) => {
     // Attach token to response cookies
     attachCookiesToResponse({ res, user: tokenUser });
 
+    // Remove password from staff object before sending response
+    const staffObj = staff.toObject();
+    delete staffObj.password;
+
     // Return staff details and token in response
     res.status(StatusCodes.CREATED).json({
-      staff,
+      staff: staffObj,
       token: tokenUser,
     });
   } catch (error) {
-    res.status(StatusCodes.BAD_REQUEST).json({ error: error.message });
+    console.log("Error registering staff:", error);
+    next(new InternalServerError(error.message));
   }
 };

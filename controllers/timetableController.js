@@ -1,96 +1,96 @@
-import Timetable from "../models/TimetableModel.js";
+import { StatusCodes } from "http-status-codes";
+import WeekTimetable from "../models/TimetableModel.js";
+import mongoose from "mongoose";
+import InternalServerError from "../errors/internal-server-error.js";
+import NotFoundError from "../errors/not-found.js";
+import { getCurrentTermDetails } from "../utils/termGenerator.js";
 
-// Create a timetable entry
-export const createTimetable = async (req, res) => {
+// Create a new week timetable
+export const createWeekTimetable = async (req, res, next) => {
   try {
-    const {
-      class: classId,
-      subject,
-      teacher,
-      day,
-      time,
-      session,
+    const { classId, schedule, startDate, holidayDurations, publicHolidays } =
+      req.body;
+    // Use getCurrentTermDetails to determine term and session
+    const termDetails = getCurrentTermDetails(
+      startDate,
+      holidayDurations,
+      publicHolidays
+    );
+    const { term, session } = termDetails;
+    // Optionally: Validate schedule array structure here
+    const timetable = await WeekTimetable.create({
+      classId,
       term,
-    } = req.body;
-    const timetable = new Timetable({
-      class: classId,
-      subject,
-      teacher,
-      day,
-      time,
       session,
-      term,
+      schedule,
     });
-    await timetable.save();
-    res.status(201).json(timetable);
+    res
+      .status(StatusCodes.CREATED)
+      .json({ message: "Week timetable created", timetable });
   } catch (error) {
-    res.status(400).json({ error: error.message });
+    console.log("Error creating week timetable:", error);
+    next(new InternalServerError(error.message));
   }
 };
 
-// Get all timetables
-export const getTimetables = async (req, res) => {
+// Get a week timetable by class, term, and session (term/session from getCurrentTermDetails)
+export const getWeekTimetable = async (req, res, next) => {
   try {
-    const timetables = await Timetable.find().populate("class subject teacher");
-    res.status(200).json(timetables);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-};
-
-// Get timetable by ID
-export const getTimetableById = async (req, res) => {
-  try {
-    const timetable = await Timetable.findById(req.params.id).populate(
-      "class subject teacher",
+    const { classId, startDate, holidayDurations, publicHolidays } = req.query;
+    // Use getCurrentTermDetails to determine term and session
+    const termDetails = getCurrentTermDetails(
+      startDate,
+      holidayDurations,
+      publicHolidays
     );
-    if (!timetable)
-      return res.status(404).json({ error: "Timetable not found" });
-    res.status(200).json(timetable);
+    const { term, session } = termDetails;
+    const timetable = await WeekTimetable.findOne({
+      classId,
+      term,
+      session,
+    })
+      .populate("schedule.periods.subject schedule.periods.teacher");
+    if (!timetable) {
+      throw new NotFoundError("Week timetable not found");
+    }
+    res.status(StatusCodes.OK).json(timetable);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.log("Error fetching week timetable:", error);
+    next(new InternalServerError(error.message));
   }
 };
 
-// Get timetable for a specific class
-export const getTimetableByClass = async (req, res) => {
+// Update a week timetable by ID
+export const updateWeekTimetable = async (req, res, next) => {
   try {
-    const timetable = await Timetable.find({
-      class: req.params.classId,
-      session: req.query.session,
-      term: req.query.term,
-    }).populate("class subject teacher");
-    res.status(200).json(timetable);
+    const { id } = req.params;
+    const update = req.body;
+    const timetable = await WeekTimetable.findByIdAndUpdate(id, update, {
+      new: true,
+    });
+    if (!timetable) {
+      throw new NotFoundError("Week timetable not found");
+    }
+    res
+      .status(StatusCodes.OK)
+      .json({ message: "Week timetable updated", timetable });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.log("Error updating week timetable:", error);
+    next(new InternalServerError(error.message));
   }
 };
 
-// Update a timetable entry
-export const updateTimetable = async (req, res) => {
+// Delete a week timetable by ID
+export const deleteWeekTimetable = async (req, res, next) => {
   try {
-    const { subject, teacher, day, time, session, term } = req.body;
-    const updatedTimetable = await Timetable.findByIdAndUpdate(
-      req.params.id,
-      { subject, teacher, day, time, session, term },
-      { new: true },
-    );
-    if (!updatedTimetable)
-      return res.status(404).json({ error: "Timetable not found" });
-    res.status(200).json(updatedTimetable);
+    const { id } = req.params;
+    const timetable = await WeekTimetable.findByIdAndDelete(id);
+    if (!timetable) {
+      throw new NotFoundError("Week timetable not found");
+    }
+    res.status(StatusCodes.OK).json({ message: "Week timetable deleted" });
   } catch (error) {
-    res.status(400).json({ error: error.message });
-  }
-};
-
-// Delete a timetable entry
-export const deleteTimetable = async (req, res) => {
-  try {
-    const timetable = await Timetable.findByIdAndDelete(req.params.id);
-    if (!timetable)
-      return res.status(404).json({ error: "Timetable not found" });
-    res.status(200).json({ message: "Timetable deleted successfully" });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.log("Error deleting week timetable:", error);
+    next(new InternalServerError(error.message));
   }
 };

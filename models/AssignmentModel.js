@@ -55,3 +55,49 @@ const assignmentSchema = new mongoose.Schema({
 const Assignment = mongoose.model("Assignment", assignmentSchema);
 
 export default Assignment;
+
+/* import mongoose from "mongoose";
+
+const assignmentSchema = new mongoose.Schema(
+  {
+    subjectTeacher: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Staff",
+      required: false,
+    },
+    lessonNote: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "LessonNote",
+      required: [true, "Please provide a lesson note"],
+    },
+    classId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Class",
+      required: false,
+    },
+    subject: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Subject",
+      required: false,
+    },
+    lessonWeek: Number,
+    topic: String,
+    subTopic: String,
+    questions: [{ type: mongoose.Schema.Types.ObjectId, ref: "Question" }],
+    marksObtainable: Number,
+    students: [{ type: mongoose.Schema.Types.ObjectId, ref: "Student" }],
+    submitted: [
+      {
+        student: { type: mongoose.Schema.Types.ObjectId, ref: "Student" },
+        submittedAt: { type: Date, default: Date.now },
+      },
+    ],
+    evaluationType: { type: String, default: "Assignment" },
+  },
+  { timestamps: true },
+); 
+
+const Assignment = mongoose.model("Assignment", assignmentSchema);
+
+export default Assignment;
+*/

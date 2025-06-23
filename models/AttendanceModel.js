@@ -1,14 +1,9 @@
 import mongoose from "mongoose";
 import {
   getCurrentTermDetails,
-  startTermGenerationDate, // Ensure this is correctly defined
-  holidayDurationForEachTerm, // Ensure this is correctly defined
-} from "../utils/termGenerator.js"; // Import getCurrentTermDetails
-
-const { session, term, weekOfTerm } = getCurrentTermDetails(
   startTermGenerationDate,
   holidayDurationForEachTerm,
-);
+} from "../utils/termGenerator.js";
 
 const attendanceSchema = new mongoose.Schema({
   student: {
@@ -44,13 +39,44 @@ const attendanceSchema = new mongoose.Schema({
   },
   session: {
     type: String,
-    default: session,
+    default: function () {
+      const { session } = getCurrentTermDetails(
+        startTermGenerationDate,
+        holidayDurationForEachTerm,
+      );
+      return session;
+    },
   },
   term: {
     type: String,
-    default: term,
+    default: function () {
+      const { term } = getCurrentTermDetails(
+        startTermGenerationDate,
+        holidayDurationForEachTerm,
+      );
+      return term;
+    },
   },
-  weekOfTerm: { type: Number, default: weekOfTerm },
+  weekOfTerm: {
+    type: Number,
+    default: function () {
+      const { weekOfTerm } = getCurrentTermDetails(
+        startTermGenerationDate,
+        holidayDurationForEachTerm,
+      );
+      return weekOfTerm;
+    },
+  },
+  dayOfTerm: {
+    type: Number,
+    default: function () {
+      const { day } = getCurrentTermDetails(
+        startTermGenerationDate,
+        holidayDurationForEachTerm,
+      );
+      return day;
+    },
+  },
   timeMarkedMorning: {
     type: Date,
     default: null, // Timestamp for marking morning attendance
@@ -59,6 +85,9 @@ const attendanceSchema = new mongoose.Schema({
     type: Date,
     default: null, // Timestamp for marking afternoon attendance
   },
+  // publicHolidays: [
+  //   {type: Date} // Array of public holiday dates in the term}
+  // ],
   totalDaysPresent: {
     type: Number,
     default: 0,
@@ -90,56 +119,8 @@ attendanceSchema.pre("save", function (next) {
   next();
 });
 
-// module.exports = mongoose.model("Attendance", attendanceSchema);
-
-/* const attendanceSchema = new mongoose.Schema({
-  student: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "Student",
-    required: true,
-  },
-  classId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "Class",
-    required: false,
-  },
-  classTeacher: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "Staff",
-    required: false,
-  },
-  date: {
-    type: Date,
-    required: true,
-  },
-  status: {
-    type: String,
-    enum: ["present", "absent", "publicHoliday", "Pending"],
-    default: "Pending",
-    required: true,
-  },
-  session: {
-    type: String,
-  },
-  term: {
-    type: String,
-  },
-  timeMarked: {
-    type: Date,
-    default: Date.now,
-  },
-  createdAt: {
-    type: Date,
-    default: Date.now,
-  },
-  updatedAt: {
-    type: Date,
-    default: Date.now,
-  },
-}); */
-
 // Pre-validation hook to auto-generate session and term if they are not provided
-attendanceSchema.pre("validate", function (next) {
+/* attendanceSchema.pre("validate", function (next) {
   if (this.isNew) {
     const startDate = startTermGenerationDate; // Use the startTermGenerationDate instead of 'now'
 
@@ -151,10 +132,10 @@ attendanceSchema.pre("validate", function (next) {
       ); // Pass the start date and holiday durations
       if (!this.session) this.session = session; // Set session if not provided
       if (!this.term) this.term = term; // Set term if not provided
-    } */
+    } 
   }
   next();
-});
+}); */
 
 // Create Attendance model
 const Attendance = mongoose.model("Attendance", attendanceSchema);

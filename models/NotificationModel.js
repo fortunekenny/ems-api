@@ -10,18 +10,6 @@ const { session, term } = getCurrentTermDetails(
   holidayDurationForEachTerm,
 );
 
-/* const notificationSchema = new mongoose.Schema({
-  user: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true }, // Link to User
-  title: { type: String, required: true },
-  message: { type: String, required: true },
-  type: { type: String, enum: ["email", "sms", "app"], required: true }, // Notification type
-  session: { type: String, default: session }, // e.g., 2023/2024
-  term: { type: String, default: term }, // e.g., First, Second, Third
-  isRead: { type: Boolean, default: false },
-  createdAt: { type: Date, default: Date.now },
-  updatedAt: { type: Date, default: Date.now },
-}); */
-
 const notificationSchema = new mongoose.Schema(
   {
     // Dynamic reference: recipient can be a Parent, Student, or Staff.
@@ -29,18 +17,20 @@ const notificationSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       required: true,
       refPath: "recipientModel", // this field determines which model is referenced
+      index: true, // for efficient queries
     },
     // This field indicates which model the recipient field refers to.
     recipientModel: {
       type: String,
       required: true,
       enum: ["Parent", "Student", "Staff"],
+      index: true, // for efficient queries
     },
     sender: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "Staff",
+      ref: "Staff", // Only staff can send notifications
       required: false,
-    }, // Link to sender
+    },
     title: {
       type: String,
       required: true,
@@ -55,7 +45,6 @@ const notificationSchema = new mongoose.Schema(
       type: String,
       enum: ["email", "sms", "app", "none"],
       default: "none",
-      // required: false,
     },
     session: {
       type: String,
@@ -92,5 +81,8 @@ const notificationSchema = new mongoose.Schema(
     timestamps: true, // Automatically adds createdAt and updatedAt fields
   },
 );
+
+// Compound index for efficient recipient lookups
+notificationSchema.index({ recipient: 1, recipientModel: 1 });
 
 export default mongoose.model("Notification", notificationSchema);

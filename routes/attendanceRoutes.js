@@ -5,6 +5,7 @@ import {
   getAllAttendanceRecords,
   getAttendanceById,
   deleteStudentAttendanceForTerm,
+  createStudentTermAttendance,
 } from "../controllers/attendanceController.js";
 import {
   authenticateToken,
@@ -42,13 +43,19 @@ router.patch(
   authorizeRole("admin", "proprietor", "teacher"),
   markStudentAttendanceForAfternoon,
 );
-
 router.delete(
   "/student/:studentId/attendance/term",
   authenticateToken,
   checkStatus,
-  authorizeRole("admin", "proprietor"), // Ensure only authorized users can delete attendance records
+  authorizeRole("admin", "proprietor"),
   deleteStudentAttendanceForTerm,
+);
+router.post(
+  "/:studentId/createTermAttendance",
+  authenticateToken,
+  checkStatus,
+  authorizeRole("admin", "proprietor", "teacher"),
+  createStudentTermAttendance,
 );
 
 export default router;

@@ -1,20 +1,37 @@
+import { StatusCodes } from "http-status-codes";
 import Fee from "../models/FeeModel.js";
+import {
+  getCurrentTermDetails,
+  holidayDurationForEachTerm,
+  startTermGenerationDate,
+} from "../utils/termGenerator.js";
+import InternalServerError from "../errors/internal-server-error.js";
+import NotFoundError from "../errors/not-found.js";
 
 // Create a new fee record
-export const createFee = async (req, res) => {
+export const createFee = async (req, res, next) => {
   try {
-    const { student, amountDue, dueDate, session, term } = req.body;
+    const { student, amountDue, dueDate } = req.body;
+
+    // Use getCurrentTermDetails to determine session and term
+    const termDetails = getCurrentTermDetails(
+      holidayDurationForEachTerm,
+      startTermGenerationDate,
+    );
+
     const fee = new Fee({
       student,
       amountDue,
       dueDate,
-      session,
-      term,
+      session: termDetails.session,
+      term:
+        termDetails.term.charAt(0).toUpperCase() + termDetails.term.slice(1), // Capitalize
     });
     await fee.save();
-    res.status(201).json(fee);
+    res.status(StatusCodes.CREATED).json(fee);
   } catch (error) {
-    res.status(400).json({ message: error.message });
+    console.log("Error creating fee record:", error);
+    next(new InternalServerError(error.message));
   }
 };
 
@@ -24,9 +41,10 @@ export const getFees = async (req, res) => {
     const fees = await Fee.find()
       .populate("student", "name") // populate student's name
       .exec();
-    res.status(200).json(fees);
+    res.status(StatusCodes.OK).json(fees);
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.log("Error fetching fee records:", error);
+    next(new InternalServerError(error.message));
   }
 };
 
@@ -37,11 +55,12 @@ export const getFeeById = async (req, res) => {
       .populate("student", "name")
       .exec();
     if (!fee) {
-      return res.status(404).json({ message: "Fee record not found" });
+      throw new NotFoundError("Fee record not found");
     }
-    res.status(200).json(fee);
+    res.status(StatusCodes.OK).json(fee);
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.log("Error fetching fee record:", error);
+    next(new InternalServerError(error.message));
   }
 };
 
@@ -52,16 +71,17 @@ export const recordInstallment = async (req, res) => {
     const fee = await Fee.findById(req.params.id);
 
     if (!fee) {
-      return res.status(404).json({ message: "Fee record not found" });
+      throw new NotFoundError("Fee record not found");
     }
 
     fee.installments.push({ amount, datePaid });
     fee.amountPaid += amount;
 
     await fee.save();
-    res.status(200).json(fee);
+    res.status(StatusCodes.OK).json(fee);
   } catch (error) {
-    res.status(400).json({ message: error.message });
+    console.log("Error recording installment:", error);
+    next(new InternalServerError(error.message));
   }
 };
 
@@ -75,11 +95,12 @@ export const updateFee = async (req, res) => {
       { new: true },
     );
     if (!updatedFee) {
-      return res.status(404).json({ message: "Fee record not found" });
+      throw new NotFoundError("Fee record not found");
     }
-    res.status(200).json(updatedFee);
+    res.status(StatusCodes.OK).json(updatedFee);
   } catch (error) {
-    res.status(400).json({ message: error.message });
+    console.log("Error updating fee record:", error);
+    next(new InternalServerError(error.message));
   }
 };
 
@@ -88,10 +109,11 @@ export const deleteFee = async (req, res) => {
   try {
     const fee = await Fee.findByIdAndDelete(req.params.id);
     if (!fee) {
-      return res.status(404).json({ message: "Fee record not found" });
+      throw new NotFoundError("Fee record not found");
     }
-    res.status(200).json({ message: "Fee record deleted" });
+    res.status(StatusCodes.OK).json({ message: "Fee record deleted" });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.log("Error deleting fee record:", error);
+    next(new InternalServerError(error.message));
   }
 };

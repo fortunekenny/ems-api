@@ -3,49 +3,52 @@ import {
   authenticateToken,
   authorizeRole,
 } from "../middleware/authentication.js";
+import { checkStatus } from "../utils/checkStatus.js";
 import * as feeController from "../controllers/feeController.js";
 
 const router = express.Router();
-
-// Role-based constants
-const ADMIN = "admin";
-const STAFF = "staff";
 
 // Fee routes
 router.post(
   "/",
   authenticateToken,
-  authorizeRole(ADMIN),
+  authorizeRole("admin", "proprietor"),
+  checkStatus,
   feeController.createFee,
 );
 router.get(
   "/",
   authenticateToken,
-  authorizeRole(ADMIN, STAFF),
+  authorizeRole("admin", "proprietor", "parent", "student", "teacher"),
+  checkStatus,
   feeController.getFees,
 );
 router.get(
   "/:id",
   authenticateToken,
-  authorizeRole(ADMIN, STAFF),
+  authorizeRole("admin", "proprietor", "parent", "student", "teacher"),
+  checkStatus,
   feeController.getFeeById,
 );
 router.patch(
   "/:id/installment",
   authenticateToken,
-  authorizeRole(ADMIN),
+  authorizeRole("admin", "proprietor"),
+  checkStatus,
   feeController.recordInstallment,
 );
 router.patch(
   "/:id",
   authenticateToken,
-  authorizeRole(ADMIN),
+  authorizeRole("admin", "proprietor"),
+  checkStatus,
   feeController.updateFee,
 );
 router.delete(
   "/:id",
   authenticateToken,
-  authorizeRole(ADMIN),
+  authorizeRole("admin", "proprietor"),
+  checkStatus,
   feeController.deleteFee,
 );
 

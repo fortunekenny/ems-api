@@ -65,8 +65,43 @@ router.patch(
   studentController.removeStudentFromParent,
 );
 
+router.patch(
+  "/:studentId/addToClass",
+  // "/:id/add-student",
+  authenticateToken,
+  authorizeRole("admin", "proprietor"),
+  checkStatus,
+  studentController.addStudentToClass,
+);
+
+router.patch(
+  "/:studentId/removeFromClass",
+  // "/:id/add-student",
+  authenticateToken,
+  authorizeRole("admin", "proprietor"),
+  checkStatus,
+  studentController.removeStudentFromClass,
+);
+
+router.patch(
+  "/:studentId/addToSubject",
+  // "/:id/add-student",
+  authenticateToken,
+  authorizeRole("admin", "proprietor", "teacher"),
+  checkStatus,
+  studentController.addStudentToSubject,
+);
+router.patch(
+  "/:studentId/removeFromSubject",
+  // "/:id/add-student",
+  authenticateToken,
+  authorizeRole("admin", "proprietor", "teacher"),
+  checkStatus,
+  studentController.removeStudentFromSubject,
+);
+
 router.delete(
-  "/:id",
+  "/:studentId",
   authenticateToken,
   authorizeRole("admin", "proprietor"),
   checkStatus,

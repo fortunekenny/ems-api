@@ -3,56 +3,42 @@ import {
   authenticateToken,
   authorizeRole,
 } from "../middleware/authentication.js";
+import { checkStatus } from "../utils/checkStatus.js";
 import * as timetableController from "../controllers/timetableController.js";
 
 const router = express.Router();
 
-// Role-based constants
-const ADMIN = "admin";
-const STAFF = "staff";
-const STUDENT = "student";
-
-// Timetable routes
+// Week Timetable CRUD routes
 router.post(
-  "/",
+  "/week",
   authenticateToken,
-  authorizeRole(ADMIN, STAFF),
-  timetableController.createTimetable,
+  authorizeRole("admin", "proprietor"),
+  checkStatus,
+  timetableController.createWeekTimetable,
 );
 
 router.get(
-  "/",
+  "/week",
   authenticateToken,
-  authorizeRole(ADMIN, STAFF, STUDENT),
-  timetableController.getTimetables, // Fetch all timetables
-);
-
-router.get(
-  "/class/:classId", // Get timetable for a specific class
-  authenticateToken,
-  authorizeRole(ADMIN, STAFF, STUDENT),
-  timetableController.getTimetableByClass,
-);
-
-router.get(
-  "/:id", // Get timetable by ID
-  authenticateToken,
-  authorizeRole(ADMIN, STAFF, STUDENT),
-  timetableController.getTimetableById, // Ensure this function exists in the controller
+  authorizeRole("admin", "proprietor", "teacher", "parent", "student"),
+  checkStatus,
+  timetableController.getWeekTimetable,
 );
 
 router.patch(
-  "/:id",
+  "/week/:id",
   authenticateToken,
-  authorizeRole(ADMIN, STAFF),
-  timetableController.updateTimetable,
+  authorizeRole("admin", "proprietor"),
+  checkStatus,
+  timetableController.updateWeekTimetable,
 );
 
 router.delete(
-  "/:id",
+  "/week/:id",
   authenticateToken,
-  authorizeRole(ADMIN),
-  timetableController.deleteTimetable,
+  authorizeRole("admin", "proprietor"),
+  checkStatus,
+  timetableController.deleteWeekTimetable,
 );
 
 export default router;
