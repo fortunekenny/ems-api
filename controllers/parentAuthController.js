@@ -20,40 +20,76 @@ export const registerParent = async (req, res, next) => {
 
     const { father, mother, singleParent } = parentData;
 
-    // Basic validation
-    if (
-      type === "Parent" &&
-      (maritalStatus === "Married" || maritalStatus === "Separated") &&
-      iAm === "False" &&
-      schoolFeesResponsibility === "False"
-    ) {
-      throw new BadRequestError("Please provide the required fields");
-    }
-    if (
-      type === "Guardian" &&
-      (maritalStatus === "Married" || maritalStatus === "Separated") &&
-      schoolFeesResponsibility === "False" &&
-      actingAs === "False"
-    ) {
-      throw new BadRequestError("Please provide the required fields");
+    // Recommended required fields for validation
+    const requiredFields = [
+      "firstName",
+      "lastName",
+      "email",
+      "password",
+      "phone",
+      "occupation",
+    ];
+    const requiredAddressFields = ["streetName", "townOrCity"];
+
+    function checkRecommendedFields(obj, role) {
+      if (!obj) throw new BadRequestError(`Missing ${role} data`);
+      for (const field of requiredFields) {
+        if (!obj[field] || obj[field] === "") {
+          throw new BadRequestError(`Missing required field '${field}' for ${role}`);
+        }
+      }
+      if (!obj.address) {
+        throw new BadRequestError(`Missing address for ${role}`);
+      }
+      for (const addrField of requiredAddressFields) {
+        if (!obj.address[addrField] || obj.address[addrField] === "") {
+          throw new BadRequestError(`Missing required address field '${addrField}' for ${role}`);
+        }
+      }
     }
 
-    if (
-      type === "Guardian" &&
-      maritalStatus === "SingleParent" &&
-      actingAs === "False" &&
-      schoolFeesResponsibility === "False"
-    ) {
-      throw new BadRequestError("Please provide the required fields");
-    }
-
+    // Enhanced validation for Parent/Married
     if (
       type === "Parent" &&
-      maritalStatus === "SingleParent" &&
-      iAm === "False" &&
-      schoolFeesResponsibility === "False"
+      maritalStatus === "Married"
     ) {
-      throw new BadRequestError("Please provide the required fields");
+      checkRecommendedFields(father, "father");
+      checkRecommendedFields(mother, "mother");
+      if (iAm === "False" && schoolFeesResponsibility === "False") {
+        throw new BadRequestError("Please provide the required fields");
+      }
+    }
+    // Enhanced validation for Parent/SingleParent
+    if (
+      type === "Parent" &&
+      maritalStatus === "SingleParent"
+    ) {
+      checkRecommendedFields(singleParent, "singleParent");
+      if (iAm === "False" && schoolFeesResponsibility === "False") {
+        throw new BadRequestError("Please provide the required fields");
+      }
+    }
+
+    // Enhanced validation for Guardian/Married
+    if (
+      type === "Guardian" &&
+      maritalStatus === "Married"
+    ) {
+      checkRecommendedFields(father, "father");
+      checkRecommendedFields(mother, "mother");
+      if (actingAs === "False" && schoolFeesResponsibility === "False") {
+        throw new BadRequestError("Please provide the required fields");
+      }
+    }
+    // Enhanced validation for Guardian/SingleParent
+    if (
+      type === "Guardian" &&
+      maritalStatus === "SingleParent"
+    ) {
+      checkRecommendedFields(singleParent, "singleParent");
+      if (actingAs === "False" && schoolFeesResponsibility === "False") {
+        throw new BadRequestError("Please provide the required fields");
+      }
     }
 
     if (!father && !mother && !singleParent) {
@@ -110,16 +146,39 @@ export const registerParent = async (req, res, next) => {
       actingAs,
     };
 
-    if (parentData.father) parentPayload.father = parentData.father;
-    if (parentData.mother) parentPayload.mother = parentData.mother;
-    if (parentData.singleParent)
-      parentPayload.singleParent = parentData.singleParent;
+    if (maritalStatus === "Married") {
+      if (parentData.father) parentPayload.father = parentData.father;
+      if (parentData.mother) parentPayload.mother = parentData.mother;
+    } else if (maritalStatus === "SingleParent") {
+      if (parentData.singleParent) parentPayload.singleParent = parentData.singleParent;
+    }
+
+    // Remove any undefined keys to prevent empty subdocs
+    Object.keys(parentPayload).forEach(key => {
+      if (parentPayload[key] === undefined) {
+        delete parentPayload[key];
+      }
+    });
+
+    // Remove any singleParent, father, or mother from parentPayload if not appropriate
+    if (maritalStatus === "Married" && parentPayload.singleParent) {
+      delete parentPayload.singleParent;
+    }
+    if (maritalStatus === "SingleParent") {
+      if (parentPayload.father) delete parentPayload.father;
+      if (parentPayload.mother) delete parentPayload.mother;
+    }
 
     const parent = new Parent(parentPayload);
     await parent.save();
 
     const tokenUser = createTokenUser(parent);
     attachCookiesToResponse({ res, user: tokenUser });
+
+    // Remove password fields from response
+    if (parent.father && parent.father.password) parent.father.password = undefined;
+    if (parent.mother && parent.mother.password) parent.mother.password = undefined;
+    if (parent.singleParent && parent.singleParent.password) parent.singleParent.password = undefined;
 
     res.status(StatusCodes.CREATED).json({
       message: "Parent registered successfully",

@@ -1,9 +1,5 @@
 import mongoose from "mongoose";
-import {
-  getCurrentTermDetails,
-  startTermGenerationDate,
-  holidayDurationForEachTerm,
-} from "../utils/termGenerator.js"; // Import the term generation function
+// Import the term generation function
 
 const subjectSchema = new mongoose.Schema({
   subjectName: { type: String, required: true }, // Subject name (e.g., Math, Science)
@@ -13,7 +9,7 @@ const subjectSchema = new mongoose.Schema({
     {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Staff", // Reference to Staff (Teacher)
-      required: false,
+      required: true,
     },
   ],
   classId: {
@@ -23,23 +19,23 @@ const subjectSchema = new mongoose.Schema({
   }, // Class offering this subject
   session: {
     type: String,
-    default: function () {
-      const { session } = getCurrentTermDetails(
-        startTermGenerationDate,
-        holidayDurationForEachTerm,
-      );
-      return session;
-    },
+    // default: function () {
+    //   const { session } = getCurrentTermDetails(
+    //     startTermGenerationDate,
+    //     holidayDurationForEachTerm,
+    //   );
+    //   return session;
+    // },
   }, // e.g., 2023/2024
   term: {
     type: String,
-    default: function () {
-      const { term } = getCurrentTermDetails(
-        startTermGenerationDate,
-        holidayDurationForEachTerm,
-      );
-      return term;
-    },
+    // default: function () {
+    //   const { term } = getCurrentTermDetails(
+    //     startTermGenerationDate,
+    //     holidayDurationForEachTerm,
+    //   );
+    //   return term;
+    // },
   }, // e.g., First, Second, Third
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now },

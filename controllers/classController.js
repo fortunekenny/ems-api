@@ -301,7 +301,6 @@ export const updateClass = async (req, res, next) => {
       classTeacher,
       subjectTeachers,
       subjects,
-      session,
       timetable,
       students,
     } = req.body;
@@ -313,7 +312,7 @@ export const updateClass = async (req, res, next) => {
       throw new NotFoundError(`No class found with id: ${classId}`);
     }
 
-    const term = getCurrentTermDetails(
+    const { term, session } = getCurrentTermDetails(
       startTermGenerationDate,
       holidayDurationForEachTerm,
     );

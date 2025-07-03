@@ -15,13 +15,15 @@ router.get(
   checkStatus,
   parentController.getParents,
 ); // Get all parents
+
 router.get(
   "/:id",
   authenticateToken,
-  authorizeRole("admin", "proprietor", "teacher", "parent", "student"),
+  authorizeRole("admin", "proprietor", "teacher", "parent" /* , "student" */),
   checkStatus,
   parentController.getParentById,
 ); // Get parent by ID
+
 router.patch(
   "/:id",
   authenticateToken,
@@ -36,6 +38,13 @@ router.patch(
   authenticateToken, // Middleware to authenticate the user
   authorizeRole("admin", "proprietor"), // Only admins can update parent status
   parentController.updateParentStatus,
+);
+
+router.patch(
+  "/:parentId/verify",
+  authenticateToken, // Middleware to authenticate the user
+  authorizeRole("admin", "proprietor"), // Only admins can update parent status
+  parentController.updateParentVerificationStatus,
 );
 
 router.patch(

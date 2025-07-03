@@ -77,27 +77,73 @@ export const getStaff = async (req, res, next) => {
       .lean();
 
     // Filter teacherRcords for each staff for the requested term/session
-    const filteredStaffs = staffs.map((staff) => {
-      let filteredTeacherRcords = staff.teacherRcords || [];
-      if (term || session) {
-        filteredTeacherRcords = filteredTeacherRcords.filter((rec) => {
-          const termMatch = term ? rec.term === term : true;
-          const sessionMatch = session ? rec.session === session : true;
-          return termMatch && sessionMatch;
-        });
-      }
-      return {
-        _id: staff._id,
-        firstName: staff.firstName,
-        middleName: staff.middleName,
-        lastName: staff.lastName,
-        employeeId: staff.employeeID,
-        role: staff.role,
-        status: staff.status,
-        createdAt: staff.createdAt,
-        teacherRcords: filteredTeacherRcords,
-      };
-    });
+    const filteredStaffs = await Promise.all(
+      staffs.map(async (staff) => {
+        let filteredTeacherRcords = staff.teacherRcords || [];
+        if (term || session) {
+          filteredTeacherRcords = filteredTeacherRcords.filter((rec) => {
+            const termMatch = term ? rec.term === term : true;
+            const sessionMatch = session ? rec.session === session : true;
+            return termMatch && sessionMatch;
+          });
+        }
+        // Populate subject and class details for each teacherRecord
+        const populatedTeacherRcords = await Promise.all(
+          filteredTeacherRcords.map(async (rec) => {
+            // Populate subjects
+            let subjects = [];
+            if (Array.isArray(rec.subjects) && rec.subjects.length > 0) {
+              subjects = await Subject.find({
+                _id: { $in: rec.subjects },
+              }).select("_id subjectName subjectCode");
+            }
+            // Populate classes
+            let classes = [];
+            if (Array.isArray(rec.classes) && rec.classes.length > 0) {
+              classes = await Class.find({ _id: { $in: rec.classes } }).select(
+                "_id className",
+              );
+            }
+            const classDetails = classes.map((cls) => ({
+              _id: cls._id,
+              className: cls.className,
+            }));
+            // Populate students for teacherRecord.students
+            let students = [];
+            if (Array.isArray(rec.students) && rec.students.length > 0) {
+              students = await Student.find({
+                _id: { $in: rec.students },
+              }).select("_id firstName lastName");
+            }
+            return {
+              ...rec,
+              subjects: subjects.map((subj) => ({
+                _id: subj._id,
+                subjectName: subj.subjectName,
+                subjectCode: subj.subjectCode,
+              })),
+              classes: classDetails,
+              students: students.map((stu) => ({
+                _id: stu._id,
+                firstName: stu.firstName,
+                lastName: stu.lastName,
+              })),
+            };
+          }),
+        );
+        return {
+          _id: staff._id,
+          firstName: staff.firstName,
+          middleName: staff.middleName,
+          lastName: staff.lastName,
+          employeeId: staff.employeeID,
+          role: staff.role,
+          status: staff.status,
+          createdAt: staff.createdAt,
+          teacherRcords: populatedTeacherRcords,
+        };
+      }),
+    );
 
     // Count total matching documents for pagination
     const totalStaffs = await Staff.countDocuments(staffQuery);
@@ -387,7 +433,32 @@ export const updateStaff = async (req, res, next) => {
 
     // If teacherRcords is provided in the request body, update the nested array directly
     if (Array.isArray(req.body.teacherRcords)) {
-      staff.teacherRcords = req.body.teacherRcords;
+      // Ensure every record in the incoming array has term and session
+      for (const rec of req.body.teacherRcords) {
+        if (!rec.term || !rec.session) {
+          throw new BadRequestError(
+            "Each teacherRcords entry must include term and session",
+          );
+        }
+      }
+      // For each incoming record, preserve all existing fields for the same term/session if not set in the incoming data
+      const incomingRecords = req.body.teacherRcords.map((rec) => {
+        const existingRec = staff.teacherRcords.find(
+          (r) => r.term === rec.term && r.session === rec.session,
+        );
+        if (existingRec) {
+          // For each field in the existing record, if not set in incoming, copy it
+          const merged = { ...existingRec, ...rec };
+          for (const key of Object.keys(existingRec)) {
+            if (rec[key] === undefined) {
+              merged[key] = existingRec[key];
+            }
+          }
+          return merged;
+        }
+        return rec;
+      });
+      staff.teacherRcords = incomingRecords;
       staff.markModified("teacherRcords");
       // Optionally update root-level fields if provided
       if (firstName) staff.firstName = firstName;

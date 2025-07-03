@@ -21,7 +21,7 @@ const parentSchema = new mongoose.Schema({
   // if separated you will provide both father and mother details
   maritalStatus: {
     type: String,
-    enum: ["Married", "Separated", "SingleParent"],
+    enum: ["Married", "SingleParent"],
     required: true,
   },
 
@@ -60,71 +60,87 @@ const parentSchema = new mongoose.Schema({
     },
   ],
   father: {
-    _id: { type: mongoose.Schema.Types.ObjectId, auto: true },
-    firstName: { type: String, trim: true, required: true },
-    lastName: { type: String, trim: true, required: true },
-    email: { type: String, unique: true, sparse: true, required: true },
-    password: { type: String, minlength: 6, required: true },
-    phone: { type: String, unique: true, sparse: true, required: true },
-    occupation: { type: String, default: "Unemployed", required: true },
-    age: { type: Number, required: true },
-    address: {
-      houseNumber: { type: Number, required: false },
-      streetName: { type: String, required: true },
-      townOrCity: { type: String, required: true },
-    },
-    isGuardian: { type: Boolean, default: false }, // Can be a Guardian
-    role: { type: String, default: "father" }, // Role for Authentication
-    // Status & Verification
-    status: { type: String, enum: ["active", "inactive"], default: "active" },
-    isVerified: { type: Boolean, default: false },
-    // Children Relationship
-    children: [{ type: mongoose.Schema.Types.ObjectId, ref: "Student" }],
+    type: new mongoose.Schema(
+      {
+        _id: { type: mongoose.Schema.Types.ObjectId, auto: true },
+        firstName: { type: String, trim: true, required: false },
+        lastName: { type: String, trim: true, required: false },
+        email: { type: String, unique: true, sparse: true, required: false },
+        password: { type: String, minlength: 6, required: false },
+        phone: { type: String, unique: true, sparse: true, required: false },
+        occupation: { type: String, default: "Unemployed", required: false },
+        age: { type: Number, required: false },
+        address: {
+          houseNumber: { type: Number, required: false },
+          streetName: { type: String, required: false },
+          townOrCity: { type: String, required: false },
+        },
+        isGuardian: { type: Boolean, default: false },
+        role: { type: String, default: "father" },
+        status: { type: String, enum: ["active", "inactive"], default: "active" },
+        isVerified: { type: Boolean, default: false },
+        children: [{ type: mongoose.Schema.Types.ObjectId, ref: "Student" }],
+      },
+      { _id: false },
+    ),
+    required: false,
+    default: undefined,
   },
-
   // Mother Details (Can be a Parent or Guardian)
   mother: {
-    _id: { type: mongoose.Schema.Types.ObjectId, auto: true },
-    firstName: { type: String, trim: true, required: true },
-    lastName: { type: String, trim: true, required: true },
-    email: { type: String, unique: true, sparse: true, required: true },
-    password: { type: String, minlength: 6, required: true },
-    phone: { type: String, unique: true, sparse: true, required: true },
-    occupation: { type: String, default: "Unemployed", required: true },
-    address: {
-      houseNumber: { type: Number, required: false },
-      streetName: { type: String, required: true },
-      townOrCity: { type: String, required: true },
-    },
-    isGuardian: { type: Boolean, default: false }, // Can be a Guardian
-    role: { type: String, default: "mother" }, // Role for Authentication
-    // Status & Verification
-    status: { type: String, enum: ["active", "inactive"], default: "active" },
-    isVerified: { type: Boolean, default: false },
-    // Children Relationship
-    children: [{ type: mongoose.Schema.Types.ObjectId, ref: "Student" }],
+    type: new mongoose.Schema(
+      {
+        _id: { type: mongoose.Schema.Types.ObjectId, auto: true },
+        firstName: { type: String, trim: true, required: false },
+        lastName: { type: String, trim: true, required: false },
+        email: { type: String, unique: true, sparse: true, required: false },
+        password: { type: String, minlength: 6, required: false },
+        phone: { type: String, unique: true, sparse: true, required: false },
+        occupation: { type: String, default: "Unemployed", required: false },
+        age: { type: Number, required: false },
+        address: {
+          houseNumber: { type: Number, required: false },
+          streetName: { type: String, required: false },
+          townOrCity: { type: String, required: false },
+        },
+        isGuardian: { type: Boolean, default: false },
+        role: { type: String, default: "mother" },
+        status: { type: String, enum: ["active", "inactive"], default: "active" },
+        isVerified: { type: Boolean, default: false },
+        children: [{ type: mongoose.Schema.Types.ObjectId, ref: "Student" }],
+      },
+      { _id: false },
+    ),
+    required: false,
+    default: undefined,
   },
 
   // If it's a single parent (Father or Mother acting alone)
   singleParent: {
-    _id: { type: mongoose.Schema.Types.ObjectId, auto: true },
-    firstName: { type: String, trim: true, required: true },
-    lastName: { type: String, trim: true, required: true },
-    email: { type: String, unique: true, sparse: true, required: true },
-    password: { type: String, minlength: 6, required: true },
-    phone: { type: String, unique: true, sparse: true, required: true },
-    occupation: { type: String, default: "Unemployed", required: true },
-    address: {
-      houseNumber: { type: Number, required: false },
-      streetName: { type: String, required: true },
-      townOrCity: { type: String, required: true },
-    },
-    role: { type: String, default: "singleParent" }, // Role for Authentication
-    // Status & Verification
-    status: { type: String, enum: ["active", "inactive"], default: "active" },
-    isVerified: { type: Boolean, default: false },
-    // Children Relationship
-    children: [{ type: mongoose.Schema.Types.ObjectId, ref: "Student" }],
+    type: new mongoose.Schema(
+      {
+        _id: { type: mongoose.Schema.Types.ObjectId, auto: true },
+        firstName: { type: String, trim: true, required: false },
+        lastName: { type: String, trim: true, required: false },
+        email: { type: String, unique: true, sparse: true, required: false },
+        password: { type: String, minlength: 6, required: false },
+        phone: { type: String, unique: true, sparse: true, required: false },
+        occupation: { type: String, default: "Unemployed", required: false },
+        age: { type: Number, required: false },
+        address: {
+          houseNumber: { type: Number, required: false },
+          streetName: { type: String, required: false },
+          townOrCity: { type: String, required: false },
+        },
+        role: { type: String, default: "singleParent" },
+        status: { type: String, enum: ["active", "inactive"], default: "active" },
+        isVerified: { type: Boolean, default: false },
+        children: [{ type: mongoose.Schema.Types.ObjectId, ref: "Student" }],
+      },
+      { _id: false },
+    ),
+    required: false,
+    default: undefined,
   },
 
   // // Children Relationship

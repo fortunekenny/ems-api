@@ -202,6 +202,11 @@ export const assignParentToStudent = async (req, res, next) => {
       throw new NotFoundError(`Student not found`);
     }
 
+    // Check if the parent is already assigned
+    if (student.parentGuardianId && student.parentGuardianId.toString() === parentGuardianId) {
+      throw new BadRequestError("This parent/guardian is already assigned to the student.");
+    }
+
     // Assign parent ID
     student.parentGuardianId = parentGuardianId;
     await student.save();
@@ -218,7 +223,7 @@ export const assignParentToStudent = async (req, res, next) => {
 
 export const updateParentVerificationStatus = async (req, res, next) => {
   try {
-    const { id: parentId } = req.params;
+    const { parentId } = req.params;
     const { isVerified } = req.body;
 
     if (typeof isVerified !== "boolean") {
@@ -232,31 +237,29 @@ export const updateParentVerificationStatus = async (req, res, next) => {
 
     let updatedRoles = [];
 
-    if (parent.father) {
+    if (parent.father && parent.father.isVerified !== isVerified) {
       parent.father.isVerified = isVerified;
       updatedRoles.push("father");
     }
 
-    if (parent.mother) {
+    if (parent.mother && parent.mother.isVerified !== isVerified) {
       parent.mother.isVerified = isVerified;
       updatedRoles.push("mother");
     }
 
-    if (parent.singleParent) {
+    if (parent.singleParent && parent.singleParent.isVerified !== isVerified) {
       parent.singleParent.isVerified = isVerified;
       updatedRoles.push("singleParent");
     }
 
     if (updatedRoles.length === 0) {
-      throw new BadRequestError("No valid parent roles to update.");
+      throw new BadRequestError("No changes needed. All roles already have the requested verification status.");
     }
 
     await parent.save();
 
     res.status(StatusCodes.OK).json({
-      message: `Verification status set to '${isVerified}' for: ${updatedRoles.join(
-        ", ",
-      )}`,
+      message: `Verification status set to '${isVerified}' for: ${updatedRoles.join(", ")}`,
     });
   } catch (error) {
     console.log("Parent verification error:", error);
@@ -310,8 +313,7 @@ export const deleteParent = async (req, res, next) => {
       deletedStudentsCount: deletedStudents.deletedCount, // number of deleted students
     });
   } catch (error) {
-    res
-      .status(StatusCodes.INTERNAL_SERVER_ERROR)
-      .json({ message: error.message });
+    console.error("Error deleting parent:", error);
+    next(new InternalServerError(error.message));
   }
 };

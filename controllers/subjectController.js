@@ -7,6 +7,11 @@ import UnauthorizedError from "../errors/unauthorize.js"; // Direct import of Un
 import InternalServerError from "../errors/internal-server-error.js";
 import Student from "../models/StudentModel.js"; // Import the Student model
 import Staff from "../models/StaffModel.js"; // Import the Staff model
+import {
+  getCurrentTermDetails,
+  startTermGenerationDate,
+  holidayDurationForEachTerm,
+} from "../utils/termGenerator.js";
 
 // Create a new subject
 export const createSubject = async (req, res, next) => {
@@ -14,12 +19,17 @@ export const createSubject = async (req, res, next) => {
     const {
       subjectName,
       subjectCode,
-      students,
+      // students,
       subjectTeachers,
       classId,
-      session,
-      term,
+      // session,
+      // term,
     } = req.body;
+
+    const { session, term } = getCurrentTermDetails(
+      startTermGenerationDate,
+      holidayDurationForEachTerm,
+    );
 
     // Check if subject already exists
     const subjectAlreadyExists = await Subject.findOne({ subjectCode });
@@ -27,11 +37,29 @@ export const createSubject = async (req, res, next) => {
       throw new BadRequestError("Subject already exists");
     }
 
-    // Create the subject
+    // Validate all subjectTeachers before any DB write
+    if (Array.isArray(subjectTeachers) && subjectTeachers.length > 0) {
+      for (const teacherId of subjectTeachers) {
+        const teacher = await Staff.findById(teacherId);
+        if (!teacher) {
+          throw new NotFoundError(`Teacher with ID ${teacherId} not found`);
+        }
+        const teacherRecord = teacher.teacherRcords.find(
+          (rec) => rec.term === term && rec.session === session,
+        );
+        if (!teacherRecord) {
+          throw new NotFoundError(
+            `Teacher record for term/session not found for teacher ${teacherId}`,
+          );
+        }
+      }
+    }
+
+    // All validation passed, now create the subject
     const subject = new Subject({
       subjectName,
       subjectCode,
-      students,
+      // students,
       subjectTeachers,
       classId,
       session,
@@ -47,15 +75,65 @@ export const createSubject = async (req, res, next) => {
 
     // Append the newly created subject's _id into the class's subjects array
     assignedClass.subjects.push(subject._id);
-    await assignedClass.save(); // Save the class with the updated subjects array
+    // Add each subjectTeacher's _id to the class's subjectTeachers array if not already present
+    if (Array.isArray(subjectTeachers) && subjectTeachers.length > 0) {
+      for (const teacherId of subjectTeachers) {
+        if (
+          !assignedClass.subjectTeachers
+            .map((id) => id.toString())
+            .includes(teacherId.toString())
+        ) {
+          assignedClass.subjectTeachers.push(teacherId);
+        }
+      }
+    }
+    await assignedClass.save(); // Save the class with the updated subjects and subjectTeachers arrays
+
+    // Add subject._id to each teacher's teacherRcords.subjects for the correct term/session
+    if (Array.isArray(subjectTeachers) && subjectTeachers.length > 0) {
+      for (const teacherId of subjectTeachers) {
+        const teacher = await Staff.findById(teacherId);
+        if (teacher) {
+          let teacherRecord = teacher.teacherRcords.find(
+            (rec) => rec.term === term && rec.session === session,
+          );
+          let modified = false;
+          // Add subject._id if not already present
+          if (
+            teacherRecord &&
+            !teacherRecord.subjects.some(
+              (id) => id.toString() === subject._id.toString(),
+            )
+          ) {
+            teacherRecord.subjects.push(subject._id);
+            modified = true;
+          }
+          // Add classId to teacherRecord.classes if not already present
+          if (
+            teacherRecord &&
+            classId &&
+            !teacherRecord.classes.some(
+              (id) => id.toString() === classId.toString(),
+            )
+          ) {
+            teacherRecord.classes.push(classId);
+            modified = true;
+          }
+          if (modified) {
+            teacher.markModified("teacherRcords");
+            await teacher.save();
+          }
+        }
+      }
+    }
 
     // Return subject details
     res.status(StatusCodes.CREATED).json({
-      subject,
       message: `Subject created and added to ${assignedClass.className} class`,
+      subject,
     });
   } catch (error) {
-    console.error("Error in createSubject", error);
+    console.log("Error in createSubject", error);
     next(new InternalServerError(error.message));
   }
 };
@@ -327,9 +405,9 @@ export const updateSubject = async (req, res, next) => {
 };
 
 // Delete subject
-export const deleteSubject = async (req, res) => {
+export const deleteSubject = async (req, res, next) => {
   try {
-    const { id: subjectId } = req.params;
+    const { subjectId } = req.params;
     const subjectToDelete = await Subject.findOne({ _id: subjectId });
 
     if (!subjectToDelete) {
@@ -341,28 +419,42 @@ export const deleteSubject = async (req, res) => {
       throw new UnauthorizedError("Only admins can delete subject records.");
     }
 
-    // Remove the subject from all teachers' subjects lists
+    // Remove the subject from all teachers' teacherRcords.subjects lists for the correct term/session
+    const { term, session } = subjectToDelete;
     await Staff.updateMany(
+      {
+        teacherRcords: {
+          $elemMatch: {
+            term: term,
+            session: session,
+            subjects: subjectId,
+          },
+        },
+      },
+      {
+        $pull: { "teacherRcords.$[rec].subjects": subjectId },
+      },
+      {
+        arrayFilters: [{ "rec.term": term, "rec.session": session }],
+      },
+    );
+
+    // Remove the subject from all students' subjects lists
+    await Student.updateMany(
       { subjects: subjectId },
       { $pull: { subjects: subjectId } },
     );
 
-    // Find all classes associated with this subject
-    const classes = await Class.find({ subjectId }); // Assuming subjectId is a reference in the class
+    // Remove the subject from all classes' subjects arrays
+    await Class.updateMany(
+      { subjects: subjectId },
+      { $pull: { subjects: subjectId } },
+    );
 
-    // Remove the subject from each class's subjectTeachers list
-    await Promise.all(
-      classes.map(async (classItem) => {
-        classItem.subjectTeachers = classItem.subjectTeachers.filter(
-          (teacherId) => {
-            // Check if teacherId exists in the subjectTeachers of the subject
-            return !subjectToDelete.subjectTeachers.includes(
-              teacherId.toString(),
-            );
-          },
-        );
-        await classItem.save(); // Save the updated class
-      }),
+    // Remove the subject from all classes' subjectTeachers arrays (if present)
+    await Class.updateMany(
+      { subjectTeachers: { $exists: true, $ne: [] } },
+      { $pull: { subjectTeachers: { $in: subjectToDelete.subjectTeachers } } },
     );
 
     // Now delete the subject
@@ -372,7 +464,7 @@ export const deleteSubject = async (req, res) => {
       .status(StatusCodes.OK)
       .json({ message: "Subject deleted successfully and references updated" });
   } catch (error) {
-    console.error("Error in deleting subject", error);
+    console.log("Error in deleting subject", error);
     next(new InternalServerError(error.message));
   }
 };
