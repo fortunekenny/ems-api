@@ -12,10 +12,6 @@ import {
   approveLessonNote,
 } from "../controllers/lessonNoteController.js";
 import {
-  authorizeClassTeacherOrAdminOrParent,
-  authorizeClassTeacherOrAdmin,
-} from "../middleware/authentication.js";
-import {
   authenticateToken,
   authorizeRole,
 } from "../middleware/authentication.js";

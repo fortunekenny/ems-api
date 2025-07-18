@@ -34,201 +34,6 @@ const getSchoolDays = (startDate, endDate) => {
   return schoolDays;
 };
 
-// Register Student and create attendance
-/* export const registerStudent = async (req, res, next) => {
-  const {
-    firstName,
-    middleName,
-    lastName,
-    houseNumber,
-    streetName,
-    townOrCity,
-    phoneNumber,
-    password,
-    classId,
-    dateOfBirth,
-    age,
-    gender,
-  } = req.body;
-
-  if (
-    !firstName ||
-    !middleName ||
-    !lastName ||
-    !streetName ||
-    !townOrCity ||
-    !dateOfBirth ||
-    !age ||
-    !gender ||
-    !classId
-  ) {
-    throw new BadRequestError("Please provide all required fields");
-  }
-
-  const { role, userId } = req.user;
-
-  try {
-    if (role !== "parent" && role !== "admin" && role !== "proprietor") {
-      throw new Forbidden("Only parents can register students.");
-    }
-
-    let parent = null;
-    let parentGuardianId = null;
-    let assignedGuardian = null;
-
-    if (role === "parent") {
-      parent = await Parent.findById(userId);
-      if (!parent) throw new NotFoundError("Parent not found");
-      parentGuardianId = parent._id;
-    }
-
-    if (role === "admin" || role === "proprietor") {
-      if (!req.body.parentGuardianId) {
-        throw new BadRequestError(
-          "Admin must assign a parent for the student.",
-        );
-      }
-
-      assignedGuardian = await Parent.findById(req.body.parentGuardianId);
-      if (!assignedGuardian) {
-        throw new NotFoundError("Assigned parent/guardian not found.");
-      }
-      parentGuardianId = assignedGuardian._id;
-    }
-
-    const { term, session, startDate, endDate } = getCurrentTermDetails(
-      startTermGenerationDate,
-      holidayDurationForEachTerm,
-    );
-
-    await Student.collection.dropIndex("email_1");
-    await Student.createIndexes();
-
-    const student = new Student({
-      firstName,
-      middleName,
-      lastName,
-      houseNumber,
-      streetName,
-      townOrCity,
-      dateOfBirth,
-      phoneNumber,
-      studentID: await generateID("STU", firstName, middleName, lastName),
-      email: req.body.email == null ? undefined : req.body.email,
-      password,
-      classId,
-      parentGuardianId,
-      age,
-      gender,
-      term,
-      session,
-    });
-
-    await student.save();
-
-    // Verify class exists and add student
-    const assignedClass = await Class.findById(classId);
-    if (!assignedClass) {
-      throw new NotFoundError(`Class not found`);
-    }
-    if (
-      assignedClass.term === term &&
-      assignedClass.session === student.session
-    ) {
-      assignedClass.students.push(student._id);
-      await assignedClass.save();
-    }
-
-    // Retrieve the class teacher from the class document
-    const classTeacher = assignedClass.classTeacher;
-
-    // Update subjects for the assigned class
-    const subjects = await Subject.find({
-      _id: { $in: assignedClass.subjects },
-    });
-    for (const subject of subjects) {
-      if (subject.term === term && subject.session === student.session) {
-        subject.students.push(student._id);
-        await subject.save();
-      }
-    }
-
-    // Update parent's children
-    const targetParent = role === "parent" ? parent : assignedGuardian;
-
-    if (targetParent.father && Object.keys(targetParent.father).length > 0) {
-      targetParent.father.children.push(student._id);
-    }
-    if (targetParent.mother && Object.keys(targetParent.mother).length > 0) {
-      targetParent.mother.children.push(student._id);
-    }
-    if (
-      targetParent.singleParent &&
-      Object.keys(targetParent.singleParent).length > 0
-    ) {
-      targetParent.singleParent.children.push(student._id);
-    }
-
-    await targetParent.save();
-
-    // Generate school days and attendance records
-    const schoolDays = getSchoolDays(new Date(startDate), new Date(endDate));
-    const attendanceIds = [];
-
-    for (const date of schoolDays) {
-      const attendance = new Attendance({
-        student: student._id,
-        classId: classId,
-        date: date,
-        morningStatus: "pending", // Separate status for morning attendance
-        afternoonStatus: "pending", // Separate status for afternoon attendance
-        // session: student.session,
-        // term: student.term,
-        classTeacher: classTeacher, // Assign class teacher
-      });
-
-      const savedAttendance = await attendance.save();
-      attendanceIds.push(savedAttendance._id);
-    }
-
-    student.attendance = attendanceIds; // Add attendance IDs to the student document
-    await student.save(); // Save updated student with attendance references
-
-    const tokenUser = createTokenUser(student);
-    attachCookiesToResponse({ res, user: tokenUser });
-
-    const populatedStudent = await Student.findById(student._id)
-      .select("-password")
-      .populate([
-        {
-          path: "classId",
-          select: "_id className classTeacher subjectTeachers subjects",
-          populate: [
-            { path: "classTeacher", select: "_id name" },
-            { path: "subjectTeachers", select: "_id name" },
-            { path: "subjects", select: "_id subjectName" },
-          ],
-        },
-        { path: "guardian", select: "_id name" },
-      ]);
-
-    res.status(StatusCodes.CREATED).json({
-      message: "Student registered successfully",
-      populatedStudent,
-      token: tokenUser,
-    });
-  } catch (error) {
-    if (error.code === 11000) {
-      console.error("Error registering student:", error);
-      throw new BadRequestError("There is a duplicate error of unique values.");
-    }
-    console.error("Error registering student:", error);
-    next(new InternalServerError(error.message));
-
-    // throw error;
-  }
-}; */
-
 export const registerStudent = async (req, res, next) => {
   const {
     firstName,
@@ -241,9 +46,37 @@ export const registerStudent = async (req, res, next) => {
     password,
     classId,
     dateOfBirth,
-    age,
     gender,
   } = req.body;
+
+  // Parse dateOfBirth from dd/mm/yyyy or dd/mm/yy string to JS Date
+  function parseDateOfBirth(dobStr) {
+    if (!dobStr || typeof dobStr !== "string") return null;
+    // Accept dd/mm/yyyy or dd/mm/yy
+    const parts = dobStr.split("/");
+    if (parts.length !== 3) return null;
+    let [day, month, year] = parts;
+    day = parseInt(day, 10);
+    month = parseInt(month, 10) - 1; // JS months are 0-based
+    year = year.length === 2 ? 2000 + parseInt(year, 10) : parseInt(year, 10);
+    const dateObj = new Date(year, month, day);
+    if (isNaN(dateObj.getTime())) return null;
+    return dateObj;
+  }
+
+  // Calculate age from JS Date
+  function calculateAge(birthDate) {
+    if (!birthDate || isNaN(birthDate.getTime())) {
+      throw new BadRequestError("Invalid dateOfBirth format");
+    }
+    const today = new Date();
+    let age = today.getFullYear() - birthDate.getFullYear();
+    const m = today.getMonth() - birthDate.getMonth();
+    if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
+      age--;
+    }
+    return age;
+  }
 
   if (
     !firstName ||
@@ -252,28 +85,35 @@ export const registerStudent = async (req, res, next) => {
     !streetName ||
     !townOrCity ||
     !dateOfBirth ||
-    !age ||
     !gender ||
     !classId
   ) {
     throw new BadRequestError("Please provide all required fields");
   }
 
-  const { role, userId } = req.user;
+  const { role, parentId, userId } = req.user;
+  let session;
 
   try {
     if (role !== "parent" && role !== "admin" && role !== "proprietor") {
       throw new Forbidden("Only parents can register students.");
     }
 
+    session = await Student.startSession();
+    session.startTransaction();
+
     let parent = null;
     let parentGuardianId = null;
     let assignedGuardian = null;
 
+    // With this improved version:
+
     if (role === "parent") {
-      parent = await Parent.findById(userId);
+      // Fallback: if parentId is missing, use userId for parent lookup
+      const parentLookupId = parentId || userId;
+      parent = await Parent.findById(parentLookupId).session(session);
       if (!parent) throw new NotFoundError("Parent not found");
-      parentGuardianId = parent._id;
+      parentGuardianId = parentLookupId;
     }
 
     if (role === "admin" || role === "proprietor") {
@@ -282,21 +122,36 @@ export const registerStudent = async (req, res, next) => {
           "Admin must assign a parent for the student.",
         );
       }
-
-      assignedGuardian = await Parent.findById(req.body.parentGuardianId);
+      assignedGuardian = await Parent.findById(
+        req.body.parentGuardianId,
+      ).session(session);
       if (!assignedGuardian) {
         throw new NotFoundError("Assigned parent/guardian not found.");
       }
       parentGuardianId = assignedGuardian._id;
     }
 
-    const { term, session, startDate, endDate } = getCurrentTermDetails(
+    const {
+      term,
+      session: sessionName,
+      startDate,
+      endDate,
+    } = getCurrentTermDetails(
       startTermGenerationDate,
       holidayDurationForEachTerm,
     );
 
-    await Student.collection.dropIndex("email_1");
-    await Student.createIndexes();
+    // Remove index ops from transaction (should be managed separately)
+    // await Student.collection.dropIndex("email_1");
+    // await Student.createIndexes();
+
+    // Parse and validate dateOfBirth
+    const parsedDOB = parseDateOfBirth(dateOfBirth);
+    if (!parsedDOB) {
+      throw new BadRequestError(
+        "Invalid dateOfBirth format. Expected dd/mm/yyyy or dd/mm/yy",
+      );
+    }
 
     const student = new Student({
       firstName,
@@ -305,33 +160,33 @@ export const registerStudent = async (req, res, next) => {
       houseNumber,
       streetName,
       townOrCity,
-      dateOfBirth,
+      dateOfBirth: parsedDOB,
       phoneNumber,
       studentID: await generateID("STU", firstName, middleName, lastName),
       email: req.body.email == null ? undefined : req.body.email,
       password,
       parentGuardianId,
-      age,
+      age: calculateAge(parsedDOB),
       gender,
       academicRecords: [
         {
           classId,
           term,
-          session,
+          session: sessionName,
         },
       ],
     });
 
-    await student.save();
+    await student.save({ session });
 
     // Verify class exists and add student
-    const assignedClass = await Class.findById(classId);
+    const assignedClass = await Class.findById(classId).session(session);
     if (!assignedClass) {
       throw new NotFoundError(`Class not found`);
     }
-    if (assignedClass.term === term && assignedClass.session === session) {
+    if (assignedClass.term === term && assignedClass.session === sessionName) {
       assignedClass.students.push(student._id);
-      await assignedClass.save();
+      await assignedClass.save({ session });
     }
 
     // Retrieve the class teacher from the class document
@@ -340,35 +195,45 @@ export const registerStudent = async (req, res, next) => {
     // Update subjects for the assigned class
     const subjects = await Subject.find({
       _id: { $in: assignedClass.subjects },
-    });
+    }).session(session);
     for (const subject of subjects) {
-      if (subject.term === term && subject.session === session) {
+      if (subject.term === term && subject.session === sessionName) {
         subject.students.push(student._id);
-        await subject.save();
+        await subject.save({ session });
       }
     }
 
     // Update parent's children
     const targetParent = role === "parent" ? parent : assignedGuardian;
     if (targetParent.father && Object.keys(targetParent.father).length > 0) {
-      targetParent.father.children.push(student._id);
+      if (!targetParent.father.children.includes(student._id)) {
+        targetParent.father.children.push(student._id);
+      }
     }
     if (targetParent.mother && Object.keys(targetParent.mother).length > 0) {
-      targetParent.mother.children.push(student._id);
+      if (!targetParent.mother.children.includes(student._id)) {
+        targetParent.mother.children.push(student._id);
+      }
     }
     if (
       targetParent.singleParent &&
       Object.keys(targetParent.singleParent).length > 0
     ) {
-      targetParent.singleParent.children.push(student._id);
+      if (!targetParent.singleParent.children.includes(student._id)) {
+        targetParent.singleParent.children.push(student._id);
+      }
     }
-    await targetParent.save();
+    await targetParent.save({ session });
 
     // Generate school days and attendance records
-    const schoolDays = ({ schoolDays } = getCurrentTermDetails(
+    const {
+      schoolDays,
+      session: currentSession,
+      term: currentTerm,
+    } = getCurrentTermDetails(
       startTermGenerationDate,
       holidayDurationForEachTerm,
-    ));
+    );
     const attendanceIds = [];
 
     for (const date of schoolDays) {
@@ -380,14 +245,31 @@ export const registerStudent = async (req, res, next) => {
         afternoonStatus: "pending",
         classTeacher: classTeacher,
       });
-
-      const savedAttendance = await attendance.save();
+      const savedAttendance = await attendance.save({ session });
       attendanceIds.push(savedAttendance._id);
     }
 
-    student.attendance = attendanceIds;
-    await student.save();
+    // 🔧 Find the current academic record
+    const academicRecord = student.academicRecords.find(
+      (record) =>
+        record.session === currentSession && record.term === currentTerm,
+    );
 
+    if (!academicRecord) {
+      throw new NotFoundError(
+        "Academic record not found for this session and term",
+      );
+    }
+
+    // ✅ Attach attendance IDs and save student
+    academicRecord.attendance.push(...attendanceIds);
+    await student.save({ session });
+
+    await session.commitTransaction();
+    await session.endSession();
+    session = null; // Prevent abort/end in catch block
+
+    // Only non-database operations after transaction is committed
     const tokenUser = createTokenUser(student);
     attachCookiesToResponse({ res, user: tokenUser });
 
@@ -396,14 +278,24 @@ export const registerStudent = async (req, res, next) => {
       .populate([
         {
           path: "academicRecords.classId",
-          select: "_id className classTeacher subjectTeachers subjects",
+          select: "_id className section",
+        },
+        {
+          path: "academicRecords",
+          populate: {
+            path: "attendance",
+            select: "id",
+          },
+        },
+        {
+          path: "parentGuardianId",
+          select: "id",
           populate: [
-            { path: "classTeacher", select: "_id name" },
-            { path: "subjectTeachers", select: "_id name" },
-            { path: "subjects", select: "_id subjectName" },
+            { path: "father", select: "id firstName lastName" },
+            { path: "mother", select: "id firstName lastName" },
+            { path: "singleParent", select: "id firstName lastName" },
           ],
         },
-        { path: "guardian", select: "_id name" },
       ]);
 
     res.status(StatusCodes.CREATED).json({
@@ -412,11 +304,23 @@ export const registerStudent = async (req, res, next) => {
       token: tokenUser,
     });
   } catch (error) {
+    if (session) {
+      try {
+        await session.abortTransaction();
+      } catch (e) {
+        // Ignore abort errors if already committed
+      }
+      try {
+        session.endSession();
+      } catch (e) {
+        // Ignore endSession errors if already ended
+      }
+    }
     if (error.code === 11000) {
-      console.error("Error registering student:", error);
+      console.log("Error registering student:", error);
       throw new BadRequestError("There is a duplicate error of unique values.");
     }
-    console.error("Error registering student:", error);
+    console.log("Error registering student:", error);
     next(new InternalServerError(error.message));
   }
 };

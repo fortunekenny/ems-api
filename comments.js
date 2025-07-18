@@ -398,3 +398,268 @@ export const deleteTimetable = async (req, res) => {
     next(new BadRequestError(error.message));
   }
 };*/
+
+// Register Student and create attendance
+/* export const registerStudent = async (req, res, next) => {
+  const {
+    firstName,
+    middleName,
+    lastName,
+    houseNumber,
+    streetName,
+    townOrCity,
+    phoneNumber,
+    password,
+    classId,
+    dateOfBirth,
+    age,
+    gender,
+  } = req.body;
+
+  if (
+    !firstName ||
+    !middleName ||
+    !lastName ||
+    !streetName ||
+    !townOrCity ||
+    !dateOfBirth ||
+    !age ||
+    !gender ||
+    !classId
+  ) {
+    throw new BadRequestError("Please provide all required fields");
+  }
+
+  const { role, userId } = req.user;
+
+  try {
+    if (role !== "parent" && role !== "admin" && role !== "proprietor") {
+      throw new Forbidden("Only parents can register students.");
+    }
+
+    let parent = null;
+    let parentGuardianId = null;
+    let assignedGuardian = null;
+
+    if (role === "parent") {
+      parent = await Parent.findById(userId);
+      if (!parent) throw new NotFoundError("Parent not found");
+      parentGuardianId = parent._id;
+    }
+
+    if (role === "admin" || role === "proprietor") {
+      if (!req.body.parentGuardianId) {
+        throw new BadRequestError(
+          "Admin must assign a parent for the student.",
+        );
+      }
+
+      assignedGuardian = await Parent.findById(req.body.parentGuardianId);
+      if (!assignedGuardian) {
+        throw new NotFoundError("Assigned parent/guardian not found.");
+      }
+      parentGuardianId = assignedGuardian._id;
+    }
+
+    const { term, session, startDate, endDate } = getCurrentTermDetails(
+      startTermGenerationDate,
+      holidayDurationForEachTerm,
+    );
+
+    await Student.collection.dropIndex("email_1");
+    await Student.createIndexes();
+
+    const student = new Student({
+      firstName,
+      middleName,
+      lastName,
+      houseNumber,
+      streetName,
+      townOrCity,
+      dateOfBirth,
+      phoneNumber,
+      studentID: await generateID("STU", firstName, middleName, lastName),
+      email: req.body.email == null ? undefined : req.body.email,
+      password,
+      classId,
+      parentGuardianId,
+      age,
+      gender,
+      term,
+      session,
+    });
+
+    await student.save();
+
+    // Verify class exists and add student
+    const assignedClass = await Class.findById(classId);
+    if (!assignedClass) {
+      throw new NotFoundError(`Class not found`);
+    }
+    if (
+      assignedClass.term === term &&
+      assignedClass.session === student.session
+    ) {
+      assignedClass.students.push(student._id);
+      await assignedClass.save();
+    }
+
+    // Retrieve the class teacher from the class document
+    const classTeacher = assignedClass.classTeacher;
+
+    // Update subjects for the assigned class
+    const subjects = await Subject.find({
+      _id: { $in: assignedClass.subjects },
+    });
+    for (const subject of subjects) {
+      if (subject.term === term && subject.session === student.session) {
+        subject.students.push(student._id);
+        await subject.save();
+      }
+    }
+
+    // Update parent's children
+    const targetParent = role === "parent" ? parent : assignedGuardian;
+
+    if (targetParent.father && Object.keys(targetParent.father).length > 0) {
+      targetParent.father.children.push(student._id);
+    }
+    if (targetParent.mother && Object.keys(targetParent.mother).length > 0) {
+      targetParent.mother.children.push(student._id);
+    }
+    if (
+      targetParent.singleParent &&
+      Object.keys(targetParent.singleParent).length > 0
+    ) {
+      targetParent.singleParent.children.push(student._id);
+    }
+
+    await targetParent.save();
+
+    // Generate school days and attendance records
+    const schoolDays = getSchoolDays(new Date(startDate), new Date(endDate));
+    const attendanceIds = [];
+
+    for (const date of schoolDays) {
+      const attendance = new Attendance({
+        student: student._id,
+        classId: classId,
+        date: date,
+        morningStatus: "pending", // Separate status for morning attendance
+        afternoonStatus: "pending", // Separate status for afternoon attendance
+        // session: student.session,
+        // term: student.term,
+        classTeacher: classTeacher, // Assign class teacher
+      });
+
+      const savedAttendance = await attendance.save();
+      attendanceIds.push(savedAttendance._id);
+    }
+
+    student.attendance = attendanceIds; // Add attendance IDs to the student document
+    await student.save(); // Save updated student with attendance references
+
+    const tokenUser = createTokenUser(student);
+    attachCookiesToResponse({ res, user: tokenUser });
+
+    const populatedStudent = await Student.findById(student._id)
+      .select("-password")
+      .populate([
+        {
+          path: "classId",
+          select: "_id className classTeacher subjectTeachers subjects",
+          populate: [
+            { path: "classTeacher", select: "_id name" },
+            { path: "subjectTeachers", select: "_id name" },
+            { path: "subjects", select: "_id subjectName" },
+          ],
+        },
+        { path: "guardian", select: "_id name" },
+      ]);
+
+    res.status(StatusCodes.CREATED).json({
+      message: "Student registered successfully",
+      populatedStudent,
+      token: tokenUser,
+    });
+  } catch (error) {
+    if (error.code === 11000) {
+      console.error("Error registering student:", error);
+      throw new BadRequestError("There is a duplicate error of unique values.");
+    }
+    console.error("Error registering student:", error);
+    next(new InternalServerError(error.message));
+
+    // throw error;
+  }
+}; */
+
+/*const studentSchema = new mongoose.Schema({
+  firstName: { type: String, required: true }, // Student name at birth
+  middleName: { type: String, required: true }, // Student second name
+  lastName: { type: String, required: true }, // Student surname
+  houseNumber: { type: Number, required: false },
+  streetName: { type: String, required: true },
+  townOrCity: { type: String, required: true },
+  email: { type: String, required: false, unique: true, sparse: true }, // Unique email, sparse Allow multiple `null` values
+  password: { type: String, default: "secret" }, // Password (hashed later)
+  studentID: { type: String, unique: true }, // Auto-generated student ID
+  classId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Class",
+    required: true,
+  }, // Class reference
+  parentGuardianId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Parent",
+    required: false, // Guardian reference
+  },
+  attendance: [{ type: mongoose.Schema.Types.ObjectId, ref: "Attendance" }], // Define as array of ObjectIds
+  role: { type: String, default: "student" }, // Default role for students
+  status: { type: String, enum: ["active", "inactive"], default: "active" },
+  previousStatus: { type: String, enum: ["active", "inactive"] }, // Track previous status
+  isVerified: { type: Boolean, default: false },
+  session: { type: String, required: false }, // e.g., 2023/2024
+  term: { type: String, required: false }, // Term (e.g., First, Second, Third)
+  dateOfBirth: {
+    type: String, // Store date as a string to validate custom format
+    required: [true, "Please provide date of birth"],
+    validate: {
+      validator: function (v) {
+        // Regular expression to validate dd/mm/yyyy format
+        return /^(0[1-9]|[12][0-9]|3[01])\/(0[1-9]|1[0-2])\/(\d{2}|\d{4})$/.test(
+          v,
+        );
+      },
+      message: "Invalid date format. Expected format: dd/mm/yy or dd/mm/yyyy",
+    },
+  },
+  age: { type: Number }, // Age of the student
+  gender: { type: String, enum: ["male", "female"], required: true }, // Gender: male or female
+  medicalHistory: { type: String }, // Optional: Medical history
+  createdAt: { type: Date, default: Date.now }, // Creation timestamp
+  updatedAt: { type: Date, default: Date.now }, // Update timestamp
+});
+
+// Pre-save hook to hash password, generate studentID, set session, and term
+studentSchema.pre("validate", async function (next) {
+  if (this.isNew) {
+    // Hash the password before saving
+    if (this.isModified("password")) {
+      const salt = await bcrypt.genSalt(10); // Generate a salt
+      this.password = await bcrypt.hash(this.password, salt); // Hash the password
+    }
+  }
+  next();
+});
+
+// Method to compare passwords
+studentSchema.methods.comparePassword = async function (password) {
+  return bcrypt.compare(password, this.password);
+};
+
+// Create the Student model
+const Student = mongoose.model("Student", studentSchema);
+
+export default Student;
+*/

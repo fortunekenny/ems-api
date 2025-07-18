@@ -35,7 +35,9 @@ export const registerParent = async (req, res, next) => {
       if (!obj) throw new BadRequestError(`Missing ${role} data`);
       for (const field of requiredFields) {
         if (!obj[field] || obj[field] === "") {
-          throw new BadRequestError(`Missing required field '${field}' for ${role}`);
+          throw new BadRequestError(
+            `Missing required field '${field}' for ${role}`,
+          );
         }
       }
       if (!obj.address) {
@@ -43,16 +45,15 @@ export const registerParent = async (req, res, next) => {
       }
       for (const addrField of requiredAddressFields) {
         if (!obj.address[addrField] || obj.address[addrField] === "") {
-          throw new BadRequestError(`Missing required address field '${addrField}' for ${role}`);
+          throw new BadRequestError(
+            `Missing required address field '${addrField}' for ${role}`,
+          );
         }
       }
     }
 
     // Enhanced validation for Parent/Married
-    if (
-      type === "Parent" &&
-      maritalStatus === "Married"
-    ) {
+    if (type === "Parent" && maritalStatus === "Married") {
       checkRecommendedFields(father, "father");
       checkRecommendedFields(mother, "mother");
       if (iAm === "False" && schoolFeesResponsibility === "False") {
@@ -60,10 +61,7 @@ export const registerParent = async (req, res, next) => {
       }
     }
     // Enhanced validation for Parent/SingleParent
-    if (
-      type === "Parent" &&
-      maritalStatus === "SingleParent"
-    ) {
+    if (type === "Parent" && maritalStatus === "SingleParent") {
       checkRecommendedFields(singleParent, "singleParent");
       if (iAm === "False" && schoolFeesResponsibility === "False") {
         throw new BadRequestError("Please provide the required fields");
@@ -71,10 +69,7 @@ export const registerParent = async (req, res, next) => {
     }
 
     // Enhanced validation for Guardian/Married
-    if (
-      type === "Guardian" &&
-      maritalStatus === "Married"
-    ) {
+    if (type === "Guardian" && maritalStatus === "Married") {
       checkRecommendedFields(father, "father");
       checkRecommendedFields(mother, "mother");
       if (actingAs === "False" && schoolFeesResponsibility === "False") {
@@ -82,10 +77,7 @@ export const registerParent = async (req, res, next) => {
       }
     }
     // Enhanced validation for Guardian/SingleParent
-    if (
-      type === "Guardian" &&
-      maritalStatus === "SingleParent"
-    ) {
+    if (type === "Guardian" && maritalStatus === "SingleParent") {
       checkRecommendedFields(singleParent, "singleParent");
       if (actingAs === "False" && schoolFeesResponsibility === "False") {
         throw new BadRequestError("Please provide the required fields");
@@ -150,11 +142,12 @@ export const registerParent = async (req, res, next) => {
       if (parentData.father) parentPayload.father = parentData.father;
       if (parentData.mother) parentPayload.mother = parentData.mother;
     } else if (maritalStatus === "SingleParent") {
-      if (parentData.singleParent) parentPayload.singleParent = parentData.singleParent;
+      if (parentData.singleParent)
+        parentPayload.singleParent = parentData.singleParent;
     }
 
     // Remove any undefined keys to prevent empty subdocs
-    Object.keys(parentPayload).forEach(key => {
+    Object.keys(parentPayload).forEach((key) => {
       if (parentPayload[key] === undefined) {
         delete parentPayload[key];
       }
@@ -176,9 +169,12 @@ export const registerParent = async (req, res, next) => {
     attachCookiesToResponse({ res, user: tokenUser });
 
     // Remove password fields from response
-    if (parent.father && parent.father.password) parent.father.password = undefined;
-    if (parent.mother && parent.mother.password) parent.mother.password = undefined;
-    if (parent.singleParent && parent.singleParent.password) parent.singleParent.password = undefined;
+    if (parent.father && parent.father.password)
+      parent.father.password = undefined;
+    if (parent.mother && parent.mother.password)
+      parent.mother.password = undefined;
+    if (parent.singleParent && parent.singleParent.password)
+      parent.singleParent.password = undefined;
 
     res.status(StatusCodes.CREATED).json({
       message: "Parent registered successfully",
@@ -186,7 +182,7 @@ export const registerParent = async (req, res, next) => {
       token: tokenUser,
     });
   } catch (error) {
-    console.error("Error creating parent:", error);
+    console.log("Error creating parent:", error);
     next(new InternalServerError(error.message));
   }
 };

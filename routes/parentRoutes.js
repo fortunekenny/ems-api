@@ -17,24 +17,39 @@ router.get(
 ); // Get all parents
 
 router.get(
-  "/:id",
+  "/:parentId",
   authenticateToken,
   authorizeRole("admin", "proprietor", "teacher", "parent" /* , "student" */),
   checkStatus,
-  parentController.getParentById,
+  parentController.getParentByParentId,
 ); // Get parent by ID
+
+router.get(
+  "/:userId/user",
+  authenticateToken,
+  authorizeRole("admin", "proprietor", "teacher", "parent" /* , "student" */),
+  checkStatus,
+  parentController.getParentByUserId,
+); // Get parent by user ID
 
 router.patch(
   "/:id",
   authenticateToken,
-  authorizeRole("admin", "proprietor", "parent"),
+  authorizeRole(
+    "admin",
+    "proprietor",
+    "parent",
+    "mother",
+    "father",
+    "singleParent",
+  ),
   checkStatus,
   parentController.updateParent,
 ); // Update parent
 
 // Route to update parent status (Admin Only)
 router.patch(
-  "/:id/status",
+  "/:userId/status",
   authenticateToken, // Middleware to authenticate the user
   authorizeRole("admin", "proprietor"), // Only admins can update parent status
   parentController.updateParentStatus,

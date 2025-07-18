@@ -1,33 +1,240 @@
+import { StatusCodes } from "http-status-codes";
+import BadRequestError from "../errors/bad-request.js";
+import InternalServerError from "../errors/internal-server-error.js";
+import NotFoundError from "../errors/not-found.js";
+import UnauthorizedError from "../errors/unauthorize.js";
+import Class from "../models/ClassModel.js";
 import Parent from "../models/ParentModel.js";
 import Student from "../models/StudentModel.js";
-import Class from "../models/ClassModel.js";
 import Subject from "../models/SubjectModel.js";
-import NotFoundError from "../errors/not-found.js";
-import { StatusCodes } from "http-status-codes";
-import checkPermissions from "../utils/checkPermissions.js";
-import InternalServerError from "../errors/internal-server-error.js";
-import BadRequestError from "../errors/bad-request.js";
-import UnauthorizedError from "../errors/unauthorize.js";
 
 // Get all parents
 export const getParents = async (req, res, next) => {
   try {
-    const parents = await Parent.find().select("-password");
-    res.status(StatusCodes.OK).json({ count: parents.length, parents });
+    // Define allowed query parameters
+    const allowedFilters = [
+      "type",
+      "maritalStatus",
+      "role",
+      "status",
+      "isVerified",
+      "name",
+      "children",
+      "sort",
+      "page",
+      "limit",
+    ];
+
+    // Get provided query keys
+    const providedFilters = Object.keys(req.query);
+
+    // Check for unknown parameters
+    const unknownFilters = providedFilters.filter(
+      (key) => !allowedFilters.includes(key),
+    );
+    if (unknownFilters.length > 0) {
+      throw new BadRequestError(
+        `Unknown query parameter(s): ${unknownFilters.join(", ")}`,
+      );
+    }
+
+    // Build filter object
+    let matchStage = {};
+    let sort, page, limit;
+    if (providedFilters.length > 0) {
+      const {
+        type,
+        maritalStatus,
+        role,
+        status,
+        isVerified,
+        name,
+        children,
+        sort: qSort,
+        page: qPage,
+        limit: qLimit,
+      } = req.query;
+      if (type) matchStage.type = type;
+      if (maritalStatus) matchStage.maritalStatus = maritalStatus;
+      if (role)
+        matchStage["$or"] = [
+          { "father.role": role },
+          { "mother.role": role },
+          { "singleParent.role": role },
+        ];
+      if (status)
+        matchStage["$or"] = [
+          { "father.status": status },
+          { "mother.status": status },
+          { "singleParent.status": status },
+        ];
+      if (isVerified !== undefined)
+        matchStage["$or"] = [
+          { "father.isVerified": isVerified === "true" },
+          { "mother.isVerified": isVerified === "true" },
+          { "singleParent.isVerified": isVerified === "true" },
+        ];
+      if (name) {
+        // Case-insensitive search for firstName or lastName in any parent type
+        const nameRegex = new RegExp(name, "i");
+        matchStage["$or"] = [
+          { "father.firstName": nameRegex },
+          { "father.lastName": nameRegex },
+          { "mother.firstName": nameRegex },
+          { "mother.lastName": nameRegex },
+          { "singleParent.firstName": nameRegex },
+          { "singleParent.lastName": nameRegex },
+        ];
+      }
+      if (children) {
+        const childRegex = new RegExp(children, "i");
+        matchStage["$or"] = [
+          { "father.children.firstName": childRegex },
+          { "father.children.middleName": childRegex },
+          { "father.children.lastName": childRegex },
+          { "mother.children.firstName": childRegex },
+          { "mother.children.middleName": childRegex },
+          { "mother.children.lastName": childRegex },
+          { "singleParent.children.firstName": childRegex },
+          { "singleParent.children.middleName": childRegex },
+          { "singleParent.children.lastName": childRegex },
+        ];
+      }
+      sort = qSort;
+      page = qPage;
+      limit = qLimit;
+    }
+    // If no filters are provided, return all parents sorted by newest
+    if (providedFilters.length === 0) {
+      sort = "newest";
+      page = 1;
+      limit = 10;
+    } else {
+      sort = sort || "newest";
+      page = Number(page) || 1;
+      limit = Number(limit) || 10;
+    }
+
+    // Build aggregation pipeline
+    const pipeline = [];
+    pipeline.push({ $match: matchStage });
+    // Sorting
+    const sortOptions = {
+      newest: { createdAt: -1 },
+      oldest: { createdAt: 1 },
+      "a-z-father": { "father.lastName": 1 },
+      "z-a-father": { "father.lastName": -1 },
+      "a-z-mother": { "mother.lastName": 1 },
+      "z-a-mother": { "mother.lastName": -1 },
+      "a-z-singleParent": { "singleParent.lastName": 1 },
+      "z-a-singleParent": { "singleParent.lastName": -1 },
+    };
+    const sortKey = sortOptions[sort] || sortOptions["newest"];
+    pipeline.push({ $sort: sortKey });
+    pipeline.push({ $skip: (page - 1) * limit });
+    pipeline.push({ $limit: limit });
+    // Project to remove password fields
+    pipeline.push({
+      $project: {
+        _id: 1,
+        // type: 1,
+        // maritalStatus: 1,
+        // iAm: 1,
+        // schoolFeesResponsibility: 1,
+        // notifications: 1,
+        // createdAt: 1,
+        // updatedAt: 1,
+        father: {
+          _id: 1,
+          firstName: 1,
+          lastName: 1,
+          email: 1,
+          // phone: 1,
+          // occupation: 1,
+          // age: 1,
+          // address: 1,
+          // isGuardian: 1,
+          // role: 1,
+          status: 1,
+          isVerified: 1,
+          children: 1,
+        },
+        mother: {
+          _id: 1,
+          firstName: 1,
+          lastName: 1,
+          email: 1,
+          // phone: 1,
+          // occupation: 1,
+          // age: 1,
+          // address: 1,
+          // isGuardian: 1,
+          // role: 1,
+          status: 1,
+          isVerified: 1,
+          children: 1,
+        },
+        singleParent: {
+          _id: 1,
+          firstName: 1,
+          lastName: 1,
+          email: 1,
+          // phone: 1,
+          // occupation: 1,
+          // age: 1,
+          // address: 1,
+          // role: 1,
+          status: 1,
+          isVerified: 1,
+          children: 1,
+        },
+      },
+    });
+
+    const parents = await Parent.aggregate(pipeline);
+
+    // Count total matching documents for pagination
+    const countPipeline = pipeline.filter(
+      (stage) =>
+        !(
+          "$skip" in stage ||
+          "$limit" in stage ||
+          "$sort" in stage ||
+          "$project" in stage
+        ),
+    );
+    countPipeline.push({ $count: "total" });
+    const countResult = await Parent.aggregate(countPipeline);
+    const totalParents = countResult[0] ? countResult[0].total : 0;
+    const numOfPages = Math.ceil(totalParents / limit);
+
+    res.status(StatusCodes.OK).json({
+      count: totalParents,
+      numOfPages,
+      currentPage: page,
+      parents,
+    });
   } catch (error) {
-    console.error("Error fetching parents:", error);
+    console.log("Error fetching parents:", error);
     next(new InternalServerError(error.message));
   }
 };
 
 // Get a parent by ID
-export const getParentById = async (req, res, next) => {
+export const getParentByParentId = async (req, res, next) => {
   try {
-    const { id: parentId } = req.params;
+    const { parentId } = req.params;
 
     const parent = await Parent.findById(parentId)
-      .select("-password")
-      .populate([{ path: "children", select: "_id firstName lastName class" }]);
+      .select("-father.password -mother.password -singleParent.password")
+      .populate([
+        { path: "father.children", select: "_id firstName lastName" },
+        { path: "mother.children", select: "_id firstName lastName" },
+        {
+          path: "singleParent.children",
+          select: "_id firstName lastName",
+        },
+      ]);
 
     if (!parent) {
       throw new NotFoundError(`Parent not found`);
@@ -59,6 +266,52 @@ export const getParentById = async (req, res, next) => {
   }
 };
 
+export const getParentByUserId = async (req, res, next) => {
+  try {
+    const { userId } = req.params;
+
+    // Find the parent that has a subdocument (father/mother/singleParent) with matching _id
+    const parent = await Parent.findOne({
+      $or: [
+        { "father._id": userId },
+        { "mother._id": userId },
+        { "singleParent._id": userId },
+      ],
+    })
+      .select("-father.password -mother.password -singleParent.password")
+      .populate([
+        { path: "father.children", select: "_id firstName lastName" },
+        { path: "mother.children", select: "_id firstName lastName" },
+        { path: "singleParent.children", select: "_id firstName lastName" },
+      ]);
+
+    if (!parent) {
+      throw new NotFoundError("Parent not found");
+    }
+
+    const parentObj = parent.toObject();
+
+    // Keep only the matched user (father, mother, or singleParent)
+    if (parentObj.father && parentObj.father._id?.toString() !== userId) {
+      delete parentObj.father;
+    }
+    if (parentObj.mother && parentObj.mother._id?.toString() !== userId) {
+      delete parentObj.mother;
+    }
+    if (
+      parentObj.singleParent &&
+      parentObj.singleParent._id?.toString() !== userId
+    ) {
+      delete parentObj.singleParent;
+    }
+
+    res.status(StatusCodes.OK).json(parentObj);
+  } catch (error) {
+    console.error("Error fetching parent by userId:", error);
+    next(new InternalServerError(error.message));
+  }
+};
+
 // Update parent record
 export const updateParent = async (req, res, next) => {
   try {
@@ -74,32 +327,37 @@ export const updateParent = async (req, res, next) => {
     // Admins and Proprietors can update any sub-role
     if (role === "admin" || role === "proprietor") {
       if (updateData.target === "father" && parent.father) {
-        Object.assign(parent.father, updateData);
+        const { password, target, ...rest } = updateData;
+        Object.assign(parent.father, rest);
       } else if (updateData.target === "mother" && parent.mother) {
-        Object.assign(parent.mother, updateData);
+        const { password, target, ...rest } = updateData;
+        Object.assign(parent.mother, rest);
       } else if (updateData.target === "singleParent" && parent.singleParent) {
-        Object.assign(parent.singleParent, updateData);
+        const { password, target, ...rest } = updateData;
+        Object.assign(parent.singleParent, rest);
       } else {
         throw new BadRequestError(
           "Please specify a valid target to update (father, mother, singleParent)",
         );
       }
     }
-
     // Parent roles can only update their own profile
-    else if (role === "Parent") {
+    else if (role === "parent") {
       if (subRole === "father" && parent.father?._id.toString() === userId) {
-        Object.assign(parent.father, updateData);
+        const { password, target, ...rest } = updateData;
+        Object.assign(parent.father, rest);
       } else if (
         subRole === "mother" &&
         parent.mother?._id.toString() === userId
       ) {
-        Object.assign(parent.mother, updateData);
+        const { password, target, ...rest } = updateData;
+        Object.assign(parent.mother, rest);
       } else if (
         subRole === "singleParent" &&
         parent.singleParent?._id.toString() === userId
       ) {
-        Object.assign(parent.singleParent, updateData);
+        const { password, target, ...rest } = updateData;
+        Object.assign(parent.singleParent, rest);
       } else {
         throw new UnauthorizedError("Not authorized to update this profile");
       }
@@ -108,12 +366,33 @@ export const updateParent = async (req, res, next) => {
     }
 
     // Session and Term can be updated by anyone with access
-    parent.session = session || parent.session;
-    parent.term = term || parent.term;
+    if (session && parent.get("session") !== session) {
+      parent.set("session", session);
+    }
+    if (term && parent.get("term") !== term) {
+      parent.set("term", term);
+    }
 
     await parent.save();
 
-    res.status(StatusCodes.OK).json({ message: "Parent updated", parent });
+    // Prepare response: remove password fields and empty subdocs
+    const parentObj = parent.toObject();
+    if (parentObj.father) delete parentObj.father.password;
+    if (parentObj.mother) delete parentObj.mother.password;
+    if (parentObj.singleParent) delete parentObj.singleParent.password;
+    if (!parentObj.father || Object.keys(parentObj.father).length === 0)
+      delete parentObj.father;
+    if (!parentObj.mother || Object.keys(parentObj.mother).length === 0)
+      delete parentObj.mother;
+    if (
+      !parentObj.singleParent ||
+      Object.keys(parentObj.singleParent).length === 0
+    )
+      delete parentObj.singleParent;
+
+    res
+      .status(StatusCodes.OK)
+      .json({ message: "Parent updated", parent: parentObj });
   } catch (error) {
     console.log("Update error:", error);
     next(new InternalServerError(error.message));
@@ -123,7 +402,7 @@ export const updateParent = async (req, res, next) => {
 // Update parent status and cascade to children
 export const updateParentStatus = async (req, res, next) => {
   try {
-    const { id: userId } = req.params; // This is the _id of the father, mother, or singleParent
+    const { userId } = req.params; // This is the _id of the father, mother, or singleParent
     const { status } = req.body;
 
     // Ensure status is valid
@@ -203,8 +482,13 @@ export const assignParentToStudent = async (req, res, next) => {
     }
 
     // Check if the parent is already assigned
-    if (student.parentGuardianId && student.parentGuardianId.toString() === parentGuardianId) {
-      throw new BadRequestError("This parent/guardian is already assigned to the student.");
+    if (
+      student.parentGuardianId &&
+      student.parentGuardianId.toString() === parentGuardianId
+    ) {
+      throw new BadRequestError(
+        "This parent/guardian is already assigned to the student.",
+      );
     }
 
     // Assign parent ID
@@ -216,8 +500,8 @@ export const assignParentToStudent = async (req, res, next) => {
       student,
     });
   } catch (error) {
-    console.error("Error assigning parent to student:", error);
-    next(error);
+    console.log("Error assigning parent to student:", error);
+    next(new InternalServerError(error.message));
   }
 };
 
@@ -253,13 +537,17 @@ export const updateParentVerificationStatus = async (req, res, next) => {
     }
 
     if (updatedRoles.length === 0) {
-      throw new BadRequestError("No changes needed. All roles already have the requested verification status.");
+      throw new BadRequestError(
+        "No changes needed. All roles already have the requested verification status.",
+      );
     }
 
     await parent.save();
 
     res.status(StatusCodes.OK).json({
-      message: `Verification status set to '${isVerified}' for: ${updatedRoles.join(", ")}`,
+      message: `Verification status set to '${isVerified}' for: ${updatedRoles.join(
+        ", ",
+      )}`,
     });
   } catch (error) {
     console.log("Parent verification error:", error);

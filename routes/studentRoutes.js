@@ -33,7 +33,7 @@ router.patch(
 
 // Route to update student status (Admin Only)
 router.patch(
-  "/student/:id/status",
+  "/:studentId/status",
   authenticateToken,
   authorizeRole("admin", "proprietor"),
   checkStatus,
@@ -42,7 +42,7 @@ router.patch(
 
 // Route to update student isVerified (Admin Only)
 router.patch(
-  "/student/:studentId/verification",
+  "/:studentId/verification",
   authenticateToken,
   authorizeRole("admin", "proprietor"),
   checkStatus,
@@ -50,7 +50,7 @@ router.patch(
 );
 
 router.patch(
-  "/student/:studentId/addStudentToAParent",
+  "/:studentId/addStudentToAParent",
   authenticateToken,
   authorizeRole("admin", "proprietor"),
   checkStatus,
@@ -58,7 +58,7 @@ router.patch(
 );
 
 router.patch(
-  "/student/:studentId/removeStudentFromAParent",
+  "/:studentId/removeStudentFromAParent",
   authenticateToken,
   authorizeRole("admin", "proprietor"),
   checkStatus,

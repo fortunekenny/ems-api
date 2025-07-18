@@ -261,7 +261,7 @@ export const getClasses = async (req, res, next) => {
       classes,
     });
   } catch (error) {
-    console.error("Error getting classes:", error);
+    console.log("Error getting classes:", error);
     next(new InternalServerError(error.message));
   }
 };

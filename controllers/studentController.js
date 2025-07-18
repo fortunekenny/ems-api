@@ -210,25 +210,13 @@ export const updateStudentVerification = async (req, res, next) => {
 };
 
 // Get a student by ID
-export const getStudentById = async (req, res) => {
+/* export const getStudentById = async (req, res) => {
   try {
     const { id: studentId } = req.params;
-    // const student = await Student.findOne({ _id: studentId }).populate('class, parentGuardianId')
     const student = await Student.findOne({ _id: studentId }).select(
       "-password",
     );
-    // .populate([
-    //   {
-    //     path: "classId",
-    //     select: "_id className classTeacher subjectTeachers subjects",
-    //     populate: [
-    //       { path: "classTeacher", select: "_id firstName lastName" },
-    //       { path: "subjectTeachers", select: "_id firstName lastName" },
-    //       { path: "subjects", select: "_id subjectName" },
-    //     ],
-    //   },
-    //   { path: "parentGuardianId", select: "_id name firstName lastName" },
-    // ]);
+
 
     if (!student) {
       throw new NotFoundError(`Student not found`);
@@ -239,6 +227,55 @@ export const getStudentById = async (req, res) => {
     res.status(StatusCodes.OK).json(student);
   } catch (error) {
     console.error("Error getting student by ID:", error);
+    next(new InternalServerError(error.message));
+  }
+}; */
+
+export const getStudentById = async (req, res, next) => {
+  try {
+    const { userId, role, subRole } = req.user; // subRole: 'father' | 'mother' | 'singleParent'
+    const { id: studentId } = req.params;
+
+    if (role === "student") {
+      // ❌ Deny access if a student tries to access another student's profile
+      if (userId !== studentId) {
+        throw new UnauthorizedError(
+          "You are not allowed to access this student record",
+        );
+      }
+    }
+
+    if (role === "parent") {
+      // ❌ Check that the subRole exists and is valid
+      if (!["father", "mother", "singleParent"].includes(subRole)) {
+        throw new UnauthorizedError("Invalid subRole for parent");
+      }
+
+      // ✅ Find parent document that contains the userId inside the specified subRole
+      const parent = await Parent.findOne({
+        [`${subRole}._id`]: userId,
+        [`${subRole}.children`]: studentId,
+      });
+
+      if (!parent) {
+        throw new UnauthorizedError(
+          "You are not allowed to access this student record",
+        );
+      }
+    }
+
+    // ✅ At this point, access is authorized
+    const student = await Student.findOne({ _id: studentId }).select(
+      "-password",
+    );
+
+    if (!student) {
+      throw new NotFoundError("Student not found");
+    }
+
+    res.status(StatusCodes.OK).json(student);
+  } catch (error) {
+    console.log("Error getting student by ID:", error);
     next(new InternalServerError(error.message));
   }
 };
@@ -375,7 +412,15 @@ export const updateStudent = async (req, res, next) => {
       );
     }
 
-    const age = calculateAge(dateOfBirth);
+    let age;
+    try {
+      if (dateOfBirth) {
+        age = calculateAge(dateOfBirth);
+      }
+    } catch (err) {
+      console.warn("Skipping age calculation:", err.message);
+    }
+
     // Then update any root‐level personal fields:
     Object.assign(student, {
       firstName: firstName ?? student.firstName,
@@ -410,7 +455,7 @@ export const updateStudent = async (req, res, next) => {
 // Update student status
 export const updateStudentStatus = async (req, res, next) => {
   try {
-    const { id: studentId } = req.params;
+    const { studentId } = req.params;
     const { status } = req.body; // Status to update (active or inactive)
 
     // Ensure status is valid
@@ -859,7 +904,8 @@ export const removeStudentFromClass = async (req, res, next) => {
 
 export const addStudentToSubject = async (req, res, next) => {
   try {
-    const { studentId, subjectId } = req.params;
+    const { studentId } = req.params;
+    const { subjectId } = req.body;
 
     // 1) Load student
     const student = await Student.findById(studentId);
@@ -894,24 +940,22 @@ export const addStudentToSubject = async (req, res, next) => {
     }
 
     // 6) Add student to subject
-    await Subject.updateOne(
-      { _id: subject._id },
-      { $addToSet: { students: student._id } },
-    );
+    if (!subject.students.includes(student._id)) {
+      subject.students.push(student._id);
+      await subject.save();
+    }
 
     // 7) Add subject to student’s academic record
-    await Student.updateOne(
-      {
-        _id: student._id,
-        "academicRecords.term": term,
-        "academicRecords.session": session,
-      },
-      { $addToSet: { "academicRecords.$.subjects": subject._id } },
-    );
+    if (!record.subjects.includes(subject._id)) {
+      record.subjects.push(subject._id);
+      await student.save();
+    }
 
-    res.status(200).json({ message: "Student added to subject successfully" });
+    res
+      .status(StatusCodes.OK)
+      .json({ message: "Student added to subject successfully" });
   } catch (error) {
-    console.error("Error in addStudentToSubject:", error);
+    console.log("Error in addStudentToSubject:", error);
     next(new InternalServerError(error.message));
   }
 };
@@ -957,7 +1001,8 @@ export const addStudentToSubject = async (req, res, next) => {
 
 export const removeStudentFromSubject = async (req, res, next) => {
   try {
-    const { studentId, subjectId } = req.params;
+    const { studentId } = req.params;
+    const { subjectId } = req.body;
 
     // 1) Load student
     const student = await Student.findById(studentId);
@@ -1000,10 +1045,10 @@ export const removeStudentFromSubject = async (req, res, next) => {
     );
 
     res
-      .status(200)
+      .status(StatusCodes.OK)
       .json({ message: "Student removed from subject successfully" });
   } catch (error) {
-    console.error("Error in removeStudentFromSubject:", error);
+    console.log("Error in removeStudentFromSubject:", error);
     next(new InternalServerError(error.message));
   }
 };

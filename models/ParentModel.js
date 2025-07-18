@@ -38,7 +38,7 @@ const parentSchema = new mongoose.Schema({
     required: false,
   },
 
-  // if parent or guardian and married or separated, its either the mother or father or both are responsible for the school fees
+  // if parent or guardian and married or singleParent, its either the mother or father or both are responsible for the school fees
   schoolFeesResponsibility: {
     type: String,
     enum: ["Father", "Mother"],
@@ -65,7 +65,13 @@ const parentSchema = new mongoose.Schema({
         _id: { type: mongoose.Schema.Types.ObjectId, auto: true },
         firstName: { type: String, trim: true, required: false },
         lastName: { type: String, trim: true, required: false },
-        email: { type: String, unique: true, sparse: true, required: false },
+        email: {
+          type: String,
+          // unique: true,
+          sparse: true,
+          required: false,
+          // default: undefined,
+        },
         password: { type: String, minlength: 6, required: false },
         phone: { type: String, unique: true, sparse: true, required: false },
         occupation: { type: String, default: "Unemployed", required: false },
@@ -77,7 +83,11 @@ const parentSchema = new mongoose.Schema({
         },
         isGuardian: { type: Boolean, default: false },
         role: { type: String, default: "father" },
-        status: { type: String, enum: ["active", "inactive"], default: "active" },
+        status: {
+          type: String,
+          enum: ["active", "inactive"],
+          default: "active",
+        },
         isVerified: { type: Boolean, default: false },
         children: [{ type: mongoose.Schema.Types.ObjectId, ref: "Student" }],
       },
@@ -93,7 +103,13 @@ const parentSchema = new mongoose.Schema({
         _id: { type: mongoose.Schema.Types.ObjectId, auto: true },
         firstName: { type: String, trim: true, required: false },
         lastName: { type: String, trim: true, required: false },
-        email: { type: String, unique: true, sparse: true, required: false },
+        email: {
+          type: String,
+          // unique: true,
+          sparse: true,
+          required: false,
+          // default: undefined,
+        },
         password: { type: String, minlength: 6, required: false },
         phone: { type: String, unique: true, sparse: true, required: false },
         occupation: { type: String, default: "Unemployed", required: false },
@@ -105,7 +121,11 @@ const parentSchema = new mongoose.Schema({
         },
         isGuardian: { type: Boolean, default: false },
         role: { type: String, default: "mother" },
-        status: { type: String, enum: ["active", "inactive"], default: "active" },
+        status: {
+          type: String,
+          enum: ["active", "inactive"],
+          default: "active",
+        },
         isVerified: { type: Boolean, default: false },
         children: [{ type: mongoose.Schema.Types.ObjectId, ref: "Student" }],
       },
@@ -122,7 +142,13 @@ const parentSchema = new mongoose.Schema({
         _id: { type: mongoose.Schema.Types.ObjectId, auto: true },
         firstName: { type: String, trim: true, required: false },
         lastName: { type: String, trim: true, required: false },
-        email: { type: String, unique: true, sparse: true, required: false },
+        email: {
+          type: String,
+          // unique: true,
+          sparse: true,
+          required: false,
+          // default: undefined,
+        },
         password: { type: String, minlength: 6, required: false },
         phone: { type: String, unique: true, sparse: true, required: false },
         occupation: { type: String, default: "Unemployed", required: false },
@@ -133,7 +159,11 @@ const parentSchema = new mongoose.Schema({
           townOrCity: { type: String, required: false },
         },
         role: { type: String, default: "singleParent" },
-        status: { type: String, enum: ["active", "inactive"], default: "active" },
+        status: {
+          type: String,
+          enum: ["active", "inactive"],
+          default: "active",
+        },
         isVerified: { type: Boolean, default: false },
         children: [{ type: mongoose.Schema.Types.ObjectId, ref: "Student" }],
       },
@@ -142,37 +172,10 @@ const parentSchema = new mongoose.Schema({
     required: false,
     default: undefined,
   },
-
-  // // Children Relationship
-  // children: [{ type: mongoose.Schema.Types.ObjectId, ref: "Student" }],
-
-  // Role for Authentication
-  // role: { type: String, default: "parent" },
-
-  // Emergency Contact
-  // emergencyContact: {
-  //   name: { type: String, required: true },
-  //   relationship: { type: String, required: true }, // e.g., "Uncle", "Aunt"
-  //   phone: { type: String, required: true },
-  // },
-
-  // Notifications
-  // notifications: [
-  //   {
-  //     title: String,
-  //     message: String,
-  //     read: { type: Boolean, default: false },
-  //     createdAt: { type: Date, default: Date.now },
-  //   },
-  // ],
-
-  // // Status & Verification
-  // status: { type: String, enum: ["active", "inactive"], default: "active" },
-  // isVerified: { type: Boolean, default: false },
-
-  /*   session: { type: String, default: session }, // e.g., 2023/2024
-  term: { type: String, default: term }, // e.g., First, Second, Third */
-
+  role: {
+    type: String,
+    default: "parent",
+  },
   // Created & Updated timestamps
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now },
@@ -196,6 +199,29 @@ parentSchema.pre("save", async function (next) {
       this.singleParent.password,
       salt,
     );
+  }
+
+  // Check for duplicate emails across all parent types
+  const emails = [
+    this.father?.email,
+    this.mother?.email,
+    this.singleParent?.email,
+  ].filter((email) => email && email !== "");
+
+  if (emails.length > 0) {
+    // Check if any other documents have these emails
+    const existingParent = await this.constructor.findOne({
+      _id: { $ne: this._id },
+      $or: [
+        { "father.email": { $in: emails } },
+        { "mother.email": { $in: emails } },
+        { "singleParent.email": { $in: emails } },
+      ],
+    });
+
+    if (existingParent) {
+      return next(new Error("Email already exists"));
+    }
   }
 
   next();
