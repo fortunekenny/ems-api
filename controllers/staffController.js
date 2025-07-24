@@ -15,7 +15,7 @@ import {
   startTermGenerationDate,
 } from "../utils/termGenerator.js";
 
-export const getStaff = async (req, res, next) => {
+/* export const getStaff = async (req, res, next) => {
   try {
     // Define allowed query parameters
     const allowedFilters = [
@@ -139,6 +139,7 @@ export const getStaff = async (req, res, next) => {
           employeeId: staff.employeeID,
           role: staff.role,
           status: staff.status,
+          email: staff.email,
           createdAt: staff.createdAt,
           teacherRcords: populatedTeacherRcords,
         };
@@ -157,6 +158,139 @@ export const getStaff = async (req, res, next) => {
     });
   } catch (error) {
     console.log("Error getting all staff:", error);
+    next(new InternalServerError(error.message));
+  }
+}; */
+
+export const getStaff = async (req, res, next) => {
+  try {
+    const { staff, status, term, session, sort, page, limit } = req.query;
+
+    const pageNumber = Number(page) || 1;
+    const limitNumber = Number(limit) || 10;
+
+    const sortOptions = {
+      newest: { createdAt: -1 },
+      oldest: { createdAt: 1 },
+      "a-z": { firstName: 1 },
+      "z-a": { firstName: -1 },
+    };
+    const sortKey = sortOptions[sort] || sortOptions.newest;
+
+    const match = {};
+    if (status) match.status = status;
+    if (staff) {
+      match.$or = [
+        { firstName: { $regex: staff, $options: "i" } },
+        { middleName: { $regex: staff, $options: "i" } },
+        { lastName: { $regex: staff, $options: "i" } },
+        { employeeID: { $regex: staff, $options: "i" } },
+      ];
+    }
+
+    const pipeline = [
+      { $match: match },
+      {
+        $unwind: { path: "$teacherRecords", preserveNullAndEmptyArrays: true },
+      },
+    ];
+
+    if (term || session) {
+      const teacherMatch = {};
+      if (term) teacherMatch["teacherRecords.term"] = term;
+      if (session) teacherMatch["teacherRecords.session"] = session;
+      pipeline.push({ $match: teacherMatch });
+    }
+
+    pipeline.push(
+      {
+        $lookup: {
+          from: "subjects",
+          localField: "teacherRecords.subjects",
+          foreignField: "_id",
+          as: "subjects",
+        },
+      },
+      {
+        $lookup: {
+          from: "classes",
+          localField: "teacherRecords.classes",
+          foreignField: "_id",
+          as: "classes",
+        },
+      },
+      {
+        $lookup: {
+          from: "students",
+          localField: "teacherRecords.students",
+          foreignField: "_id",
+          as: "students",
+        },
+      },
+      {
+        $project: {
+          _id: 1,
+          firstName: 1,
+          middleName: 1,
+          lastName: 1,
+          employeeID: 1,
+          status: 1,
+          teacherRecord: {
+            session: "$teacherRecords.session",
+            term: "$teacherRecords.term",
+            isClassTeacher: "$teacherRecords.isClassTeacher",
+            subjects: {
+              $map: {
+                input: "$subjects",
+                as: "s",
+                in: {
+                  subjectId: "$$s._id",
+                  subjectName: "$$s.subjectName",
+                  subjectCode: "$$s.subjectCode",
+                },
+              },
+            },
+            classes: {
+              $map: {
+                input: "$classes",
+                as: "c",
+                in: {
+                  classId: "$$c._id",
+                  className: "$$c.className",
+                },
+              },
+            },
+            students: {
+              $map: {
+                input: "$students",
+                as: "stu",
+                in: {
+                  studentId: "$$stu._id",
+                  firstName: "$$stu.firstName",
+                  lastName: "$$stu.lastName",
+                },
+              },
+            },
+          },
+        },
+      },
+      { $sort: sortKey },
+      { $skip: (pageNumber - 1) * limitNumber },
+      { $limit: limitNumber },
+    );
+
+    const staffData = await Staff.aggregate(pipeline);
+    const total = await Staff.countDocuments(match);
+    const numOfPages = Math.ceil(total / limitNumber);
+
+    res.status(200).json({
+      count: total,
+      numOfPages,
+      currentPage: pageNumber,
+      staffs: staffData,
+    });
+  } catch (error) {
+    console.error("Error fetching staff:", error);
     next(new InternalServerError(error.message));
   }
 };

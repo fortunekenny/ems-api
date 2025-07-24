@@ -5,6 +5,7 @@ import {
 } from "../middleware/authentication.js";
 import * as staffController from "../controllers/staffController.js";
 import { checkStatus } from "../utils/checkStatus.js";
+import checkPermissions from "../utils/checkPermissions.js";
 
 const router = express.Router();
 
@@ -22,21 +23,29 @@ router
 //     staffController.deleteAllStaff,
 //   );
 
+/* 
+  async (req, res, next) => {
+    await checkPermissions(req.user, req.params.id);
+    next();
+  },
+*/
+
 router
   .route("/:staffId")
   .get(
     [
       authenticateToken,
-      checkStatus,
       authorizeRole("admin", "proprietor", "teacher", "non-teacher"),
+      checkPermissions,
+      checkStatus,
     ],
     staffController.getStaffById,
   )
   .patch(
     [
       authenticateToken,
-      checkStatus,
       authorizeRole("admin", "proprietor", "teacher", "non-teacher"),
+      checkStatus,
     ],
     staffController.updateStaff,
   )
@@ -69,12 +78,8 @@ router
 router
   .route("/rolloverTeacherRecords")
   .post(
-    [
-      authenticateToken,
-      checkStatus,
-      authorizeRole("admin", "proprietor")
-    ],
-    staffController.rolloverTeacherRecords
+    [authenticateToken, checkStatus, authorizeRole("admin", "proprietor")],
+    staffController.rolloverTeacherRecords,
   );
 
 export default router;

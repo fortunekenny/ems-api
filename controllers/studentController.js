@@ -164,7 +164,7 @@ export const getStudents = async (req, res, next) => {
       students,
     });
   } catch (error) {
-    console.error("Error getting all students:", error);
+    console.log("Error getting all students:", error);
     next(new InternalServerError(error.message));
   }
 };
@@ -201,7 +201,7 @@ export const updateStudentVerification = async (req, res, next) => {
     await student.save();
 
     res.status(StatusCodes.OK).json({
-      message: `Student verification status updated to '${isVerified}'`,
+      message: `Student verified successfully`,
     });
   } catch (error) {
     console.log("Error updating student verification:", error);
@@ -236,16 +236,16 @@ export const getStudentById = async (req, res, next) => {
     const { userId, role, subRole } = req.user; // subRole: 'father' | 'mother' | 'singleParent'
     const { id: studentId } = req.params;
 
-    if (role === "student") {
+    /* if (role === "student") {
       // ❌ Deny access if a student tries to access another student's profile
       if (userId !== studentId) {
         throw new UnauthorizedError(
           "You are not allowed to access this student record",
         );
       }
-    }
+    } */
 
-    if (role === "parent") {
+    /* if (role === "parent") {
       // ❌ Check that the subRole exists and is valid
       if (!["father", "mother", "singleParent"].includes(subRole)) {
         throw new UnauthorizedError("Invalid subRole for parent");
@@ -262,7 +262,7 @@ export const getStudentById = async (req, res, next) => {
           "You are not allowed to access this student record",
         );
       }
-    }
+    } */
 
     // ✅ At this point, access is authorized
     const student = await Student.findOne({ _id: studentId }).select(
@@ -447,7 +447,7 @@ export const updateStudent = async (req, res, next) => {
       updatedStudent,
     });
   } catch (error) {
-    console.error("Error updating student:", error);
+    console.log("Error updating student:", error);
     next(new BadRequestError(error.message));
   }
 };
@@ -479,10 +479,10 @@ export const updateStudentStatus = async (req, res, next) => {
     await student.save();
 
     res.status(StatusCodes.OK).json({
-      message: `Student status updated to '${status}'.`,
+      message: `Student status updated successfully.`,
     });
   } catch (error) {
-    console.error("Error updating student:", error);
+    console.log("Error updating student:", error);
     next(new BadRequestError(error.message));
   }
 };
@@ -634,7 +634,7 @@ export const deleteStudent = async (req, res, next) => {
       .status(StatusCodes.OK)
       .json({ message: "Student and associated records deleted successfully" });
   } catch (error) {
-    console.error("Error deleting student:", error);
+    console.log("Error deleting student:", error);
     next(new BadRequestError(error.message));
   }
 };
@@ -860,7 +860,7 @@ export const removeStudentFromClass = async (req, res, next) => {
       message: "Student moved to new class and records updated successfully",
     });
   } catch (error) {
-    console.error("Error removing student from class:", error);
+    console.log("Error removing student from class:", error);
     next(new InternalServerError(error.message));
   }
 };

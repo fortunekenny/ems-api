@@ -17,6 +17,7 @@ import {
   holidayDurationForEachTerm,
 } from "../utils/termGenerator.js";
 import InternalServerError from "../errors/internal-server-error.js";
+import Staff from "../models/StaffModel.js";
 
 // Utility to generate a list of school days in a term (excluding weekends)
 const getSchoolDays = (startDate, endDate) => {
@@ -189,9 +190,6 @@ export const registerStudent = async (req, res, next) => {
       await assignedClass.save({ session });
     }
 
-    // Retrieve the class teacher from the class document
-    const classTeacher = assignedClass.classTeacher;
-
     // Update subjects for the assigned class
     const subjects = await Subject.find({
       _id: { $in: assignedClass.subjects },
@@ -234,6 +232,27 @@ export const registerStudent = async (req, res, next) => {
       startTermGenerationDate,
       holidayDurationForEachTerm,
     );
+
+    // Retrieve the class teacher from the class document
+    const classTeacher = await Staff.findById(assignedClass.classTeacher);
+    if (!classTeacher) {
+      throw new NotFoundError("Class teacher not found for this class.");
+    }
+    const teacherRecord = classTeacher.teacherRecords.find(
+      (record) =>
+        record.session === currentSession && record.term === currentTerm,
+    );
+
+    if (!teacherRecord) {
+      throw new NotFoundError(
+        "Teacher record not found for this session and term.",
+      );
+    }
+    // ✅ Attach student ID to teacher's record
+    teacherRecord.students.push(student._id);
+    await classTeacher.save({ session });
+
+    // Create attendance records for each school day
     const attendanceIds = [];
 
     for (const date of schoolDays) {
@@ -289,11 +308,20 @@ export const registerStudent = async (req, res, next) => {
         },
         {
           path: "parentGuardianId",
-          select: "id",
+          select: "_id", // or leave empty if you want to include all top-level fields
           populate: [
-            { path: "father", select: "id firstName lastName" },
-            { path: "mother", select: "id firstName lastName" },
-            { path: "singleParent", select: "id firstName lastName" },
+            {
+              path: "father",
+              select: "_id firstName lastName",
+            },
+            {
+              path: "mother",
+              select: "_id firstName lastName",
+            },
+            {
+              path: "singleParent",
+              select: "_id firstName lastName",
+            },
           ],
         },
       ]);

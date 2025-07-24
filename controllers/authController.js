@@ -10,10 +10,10 @@ import Staff from "../models/StaffModel.js";
 import InternalServerError from "../errors/internal-server-error.js";
 
 export const login = async (req, res, next) => {
-  const { email, password, studentID, staffId, phone } = req.body;
+  const { email, password, studentID, employeeID, phone } = req.body;
 
   // Check if required fields are provided
-  if (!password || (!email && !studentID && !staffId && !phone)) {
+  if (!password || (!email && !studentID && !employeeID && !phone)) {
     throw new BadRequestError("Please provide required fields.");
   }
 
@@ -130,9 +130,12 @@ export const login = async (req, res, next) => {
     }
 
     // Check if Staff is logging in (email or staffId allowed)
-    if (email || staffId) {
-      const staffQuery = email ? { email } : { staffId };
+    if (email || employeeID) {
+      // console.log("Staff login attempt:", { email, employeeID });
+      const staffQuery = email ? { email } : { employeeID };
+      // console.log("Staff login attempt:", { staffQuery });
       user = await Staff.findOne(staffQuery);
+      // console.log("Staff found:", user);
       if (user && (await bcrypt.compare(password, user.password))) {
         const tokenUser = createTokenUser(user); // Assuming Staff has name, email, role
         attachCookiesToResponse({ res, user: tokenUser });

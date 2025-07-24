@@ -48,7 +48,7 @@ const staffSchema = new mongoose.Schema({
       required: false,
     },
   ],
-  teacherRcords: [
+  teacherRecords: [
     {
       session: { type: String, required: false }, // Academic session. Automated
       term: { type: String, required: false }, // e.g., First, Second, Third term. Automated
