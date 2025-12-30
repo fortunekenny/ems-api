@@ -489,8 +489,8 @@ export const updateStaff = async (req, res, next) => {
             // Ensure prevRec.subjects is always an array
             prevRec.subjects = Array.isArray(prevRec.subjects)
               ? prevRec.subjects.filter(
-                  (subjId) => subjId.toString() !== subjectId.toString(),
-                )
+                (subjId) => subjId.toString() !== subjectId.toString(),
+              )
               : [];
             // Remove class if no more subjects for this class
             const classSubjects = await Subject.find({
@@ -502,8 +502,8 @@ export const updateStaff = async (req, res, next) => {
             if (classSubjects.length === 0) {
               prevRec.classes = Array.isArray(prevRec.classes)
                 ? prevRec.classes.filter(
-                    (cid) => cid.toString() !== subject.classId.toString(),
-                  )
+                  (cid) => cid.toString() !== subject.classId.toString(),
+                )
                 : [];
             }
           }
@@ -1081,6 +1081,80 @@ export const changeClassTeacher = async (req, res, next) => {
   } catch (error) {
     console.log("Error changing class teacher: ", error);
     next(new BadRequestError(error.message));
+  }
+};
+
+export const addStudentToTeacherRecord = async (req, res, next) => {
+  try {
+    const { studentId, term, session } = req.body;
+
+    // 1. Load student and validate
+    const student = await Student.findById(studentId);
+    if (!student) {
+      throw new NotFoundError("Student not found");
+    }
+
+    // 2. Find the academic record for the student for the given term/session
+    const academicRecord = student.academicRecords.find(
+      (rec) => rec.term === term && rec.session === session,
+    );
+
+    if (!academicRecord || !academicRecord.classId) {
+      throw new NotFoundError(
+        "Student's academic record for this term/session not found",
+      );
+    }
+
+    // 3. Load the class teacher from the class document
+    const assignedClass = await Class.findById(academicRecord.classId);
+    if (!assignedClass) {
+      throw new NotFoundError("Assigned class not found");
+    }
+
+    const classTeacherId = assignedClass.classTeacher;
+    const classTeacher = await Staff.findById(classTeacherId);
+    if (!classTeacher) {
+      throw new NotFoundError("Class teacher not found");
+    }
+
+    // 4. Find the teacher's record for the term/session
+    const teacherRecord = classTeacher.teacherRecords.find(
+      (rec) => rec.term === term && rec.session === session,
+    );
+
+    if (!teacherRecord) {
+      throw new NotFoundError(
+        "Teacher's record for this term/session not found",
+      );
+    }
+
+    // 5. Check if the teacher is the class teacher for this class
+    if (
+      teacherRecord.isClassTeacher &&
+      teacherRecord.isClassTeacher.toString() ===
+      academicRecord.classId.toString()
+    ) {
+      // 6. Add student to teacherRecord.students if not already present
+      if (!teacherRecord.students.includes(student._id)) {
+        teacherRecord.students.push(student._id);
+      } else {
+        throw new BadRequestError("Student already exists in teacher's record");
+      }
+
+      // 7. Save the staff document
+      await classTeacher.save();
+
+      res.status(StatusCodes.OK).json({
+        message: "Student successfully added to teacher's record",
+      });
+    } else {
+      throw new UnauthorizedError(
+        "Teacher is not the class teacher of this student",
+      );
+    }
+  } catch (error) {
+    console.log("Error in adding student to teacher's record:", error);
+    next(new InternalServerError(error.message));
   }
 };
 

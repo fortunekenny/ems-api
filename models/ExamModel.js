@@ -5,6 +5,11 @@ import {
   holidayDurationForEachTerm, // Ensure this is correctly defined
 } from "../utils/termGenerator.js";
 
+const { session, term } = getCurrentTermDetails(
+  startTermGenerationDate,
+  holidayDurationForEachTerm,
+);
+
 const examSchema = new mongoose.Schema({
   subjectTeacher: {
     type: mongoose.Schema.Types.ObjectId,
@@ -71,8 +76,8 @@ const examSchema = new mongoose.Schema({
     },
   ], // list of students who have submitted exam
   evaluationType: { type: String, required: false, default: "Exam" },
-  session: { type: String, required: true }, // e.g., 2023/2024
-  term: { type: String, required: true }, // e.g., First, Second, Third
+  session: { type: String, default: session }, // e.g., 2023/2024
+  term: { type: String, default: term }, // e.g., First, Second, Third
   status: {
     type: String,
     enum: ["pending", "submitted"],

@@ -3,8 +3,10 @@ import { StatusCodes } from "http-status-codes";
 import BadRequestError from "../errors/bad-request.js";
 import InternalServerError from "../errors/internal-server-error.js";
 import NotFoundError from "../errors/not-found.js";
-import Assignment from "../models/AssignmentModel.js";
-import Classwork from "../models/ClassWorkModel.js";
+import UnauthorizedError from "../errors/unauthorize.js";
+// import Assignment from "../models/AssignmentModel.js";
+// import Classwork from "../models/ClassWorkModel.js";
+import Class from "../models/ClassModel.js";
 import LessonNote from "../models/LessonNoteModel.js";
 import Staff from "../models/StaffModel.js";
 import {
@@ -13,18 +15,19 @@ import {
   startTermGenerationDate,
 } from "../utils/termGenerator.js";
 import {
-  createNotificationForLessonNote,
+  // createNotificationForLessonNote,
   sendBulkNotifications,
 } from "./notificationController.js";
-import Class from "../models/ClassModel.js";
-import { ObjectId } from "mongoose";
+// import { ObjectId } from "mongoose";
 import mongoose from "mongoose";
 
 // Create a new lesson note
 export const createLessonNote = async (req, res, next) => {
   try {
     const { assignment, evaluation, subject } = req.body;
-    const { id: userId, role: userRole } = req.user; // Authenticated user ID and role
+    const { userId, role } = req.user; // Authenticated user ID and role
+    console.log("User ID:", userId);
+    console.log("User Role:", role);
 
     // Get current term details
     const {
@@ -70,55 +73,72 @@ export const createLessonNote = async (req, res, next) => {
     let isAuthorized = false;
     // let teacherDoc;
 
-    if (["admin", "proprietor"].includes(userRole)) {
-      isAuthorized = true;
+    if (["admin", "proprietor"].includes(role)) {
       teacherId = req.body.teacher;
 
       // Ensure 'subjectTeacher' field is provided
       if (!teacherId) {
         throw new BadRequestError(
-          "For admin or proprietor, the 'teacher' field must be provided.",
+          "For admin/proprietor, 'teacher' field is required.",
         );
       }
 
-      const teacher = await Staff.findById(teacherId).populate([
-        { path: "subjects", select: "_id subjectName" },
-      ]);
+      const teacher = await Staff.findById(teacherId).populate(
+        "teacherRecords.subjects",
+      );
       if (!teacher) {
         throw new NotFoundError("Provided teacher not found.");
       }
 
-      const isAssignedSubject = teacher.subjects.some(
-        (subjectItem) => subjectItem && subjectItem.equals(subject),
+      // Flatten all subjects across all records for admin to verify
+      const allSubjects = teacher.teacherRecords.flatMap((rec) =>
+        rec.subjects.map((s) => (s && s._id ? s._id.toString() : s.toString())),
       );
 
-      if (!isAssignedSubject) {
-        throw new BadRequestError(
-          "The specified teacher is not assigned to the selected subject.",
+      isAuthorized = allSubjects.includes(subject.toString());
+
+      if (!isAuthorized) {
+        throw new UnauthorizedError(
+          "You are not authorized to create this lesson note.",
         );
       }
-    } else if (userRole === "teacher") {
+    } else if (role === "teacher") {
       // For teachers, validate that the requested subject is assigned to them
-      const teacher = await Staff.findById(userId).populate("subjects");
+      teacherId = userId;
+
+      const teacher = await Staff.findById(userId).populate(
+        "teacherRecords.subjects",
+      );
+
       if (!teacher) {
         throw new NotFoundError("Teacher not found.");
       }
 
-      isAuthorized = teacher.subjects.some(
-        (subjectItem) => subjectItem.toString() === subject.toString(),
+      const { term, session } = getCurrentTermDetails(
+        startTermGenerationDate,
+        holidayDurationForEachTerm,
       );
 
-      if (!isAuthorized) {
+      const teacherRecord = teacher.teacherRecords.find(
+        (rec) => rec.term === term && rec.session === session,
+      );
+
+      if (!teacherRecord) {
         throw new BadRequestError(
-          "You are not authorized to create lesson note for this subject.",
+          "Teacher has no record for current session/term.",
         );
       }
 
-      teacherId = userId;
+      // Handle both populated subject docs and raw ObjectId values
+      isAuthorized = teacherRecord.subjects.some(
+        (subj) =>
+          (subj && subj._id ? subj._id.toString() : subj.toString()) ===
+          subject.toString(),
+      );
     }
 
     if (!isAuthorized) {
-      throw new BadRequestError(
+      throw new UnauthorizedError(
         "You are not authorized to create this lesson note.",
       );
     }
@@ -128,11 +148,13 @@ export const createLessonNote = async (req, res, next) => {
       throw new BadRequestError("Updater not found.");
     }
 
-    const classData = await Class.findOne({
-      _id: req.body.classId,
-      // term: req.body.term,
-      // session: req.body.session,
-    }).populate("subjects", "subjectName");
+    // Lookup the class by its id. Using findById is more robust
+    // than matching on term/session which may differ between
+    // lesson notes and class defaults.
+    const classData = await Class.findById(req.body.classId).populate(
+      "subjects",
+      "subjectName",
+    );
     if (!classData) {
       throw new NotFoundError("Class not found.");
     }
@@ -142,6 +164,11 @@ export const createLessonNote = async (req, res, next) => {
     );
     if (!subjectData) {
       throw new NotFoundError("Subject data not found in class.");
+    }
+
+    // Ensure `content` is an array (backwards-compatible with string input)
+    if (req.body.content && !Array.isArray(req.body.content)) {
+      req.body.content = [req.body.content];
     }
 
     // Create and save the new lesson note
@@ -187,7 +214,7 @@ export const createLessonNote = async (req, res, next) => {
     const populatedLessonNote = await LessonNote.findById(
       lessonNote._id,
     ).populate([
-      { path: "teacher", select: "_id name" },
+      { path: "teacher", select: "_id firstName lastName" },
       { path: "classId", select: "_id className" },
       { path: "subject", select: "_id subjectName" },
       {
@@ -213,11 +240,8 @@ export const createLessonNote = async (req, res, next) => {
       populatedLessonNote,
     });
   } catch (error) {
-    next(
-      error instanceof BadRequestError
-        ? error
-        : new BadRequestError(error.message),
-    );
+    console.log("Error creating lesson note:", error);
+    next(new InternalServerError(error.message));
   }
 };
 
@@ -603,7 +627,7 @@ export const getLessonNoteByWeek = async (req, res, next) => {
 /*export const updateLessonNote = async (req, res, next) => {
   try {
     const { id } = req.params; // Lesson note ID from request params
-    const { id: userId, role: userRole } = req.user; // Authenticated user details
+    const { id: userId, role: role } = req.user; // Authenticated user details
 
     // Fetch the existing lesson note to validate authorization
     const lessonNote = await LessonNote.findById(id).populate("teacher");
@@ -615,7 +639,7 @@ export const getLessonNoteByWeek = async (req, res, next) => {
 
     // Authorization check
     if (
-      !["admin", "proprietor"].includes(userRole) &&
+      !["admin", "proprietor"].includes(role) &&
       teacher.toString() !== userId
     ) {
       throw new BadRequestError(
@@ -692,7 +716,7 @@ export const getLessonNoteByWeek = async (req, res, next) => {
 /*export const updateLessonNote = async (req, res, next) => {
   try {
     const { id } = req.params; // Lesson note ID
-    const { id: userId, role: userRole } = req.user; // Authenticated user
+    const { id: userId, role: role } = req.user; // Authenticated user
 
     // Fetch the existing lesson note
     const lessonNote = await LessonNote.findById(id).populate("teacher");
@@ -708,7 +732,7 @@ export const getLessonNoteByWeek = async (req, res, next) => {
 
     // Authorization check
     if (
-      !["admin", "proprietor"].includes(userRole) &&
+      !["admin", "proprietor"].includes(role) &&
       teacher.toString() !== userId
     ) {
       throw new BadRequestError(
@@ -796,7 +820,7 @@ export const getLessonNoteByWeek = async (req, res, next) => {
 export const updateLessonNote = async (req, res, next) => {
   try {
     const { id } = req.params; // Test ID from request params
-    const { id: userId, role: userRole } = req.user; // Authenticated user ID and role
+    const { id: userId, role: role } = req.user; // Authenticated user ID and role
 
     // Fetch the existing lesson note to validate authorization
     const lessonNote = await LessonNote.findById(id).populate("teacher");
@@ -812,35 +836,63 @@ export const updateLessonNote = async (req, res, next) => {
     let isAuthorized = false;
     let teacherDoc;
 
-    if (["admin", "proprietor"].includes(userRole)) {
-      isAuthorized = true;
+    if (["admin", "proprietor"].includes(role)) {
+      // Admins/proprietors can create on behalf of another teacher — ensure that
+      // the supplied teacher actually teaches the provided subject.
       teacherId = teacher;
 
-      teacherDoc = await Staff.findById(teacherId).populate([
-        { path: "subjects", select: "_id subjectName" },
-      ]);
+      teacherDoc = await Staff.findById(teacherId).populate(
+        "teacherRecords.subjects",
+      );
       if (!teacherDoc) {
         throw new NotFoundError("Provided teacher not found.");
       }
 
-      const isAssignedSubject = subjectTeacher.subjects.some(
-        (subjectItem) => subjectItem && subjectItem.equals(subject),
+      // Flatten all subjects across all teacherRecords and normalize IDs
+      const allSubjects = teacherDoc.teacherRecords.flatMap((rec) =>
+        rec.subjects.map((s) => (s && s._id ? s._id.toString() : s.toString())),
       );
+
+      const isAssignedSubject = allSubjects.includes(subject.toString());
 
       if (!isAssignedSubject) {
         throw new BadRequestError(
           "The specified teacher is not assigned to the selected subject.",
         );
       }
-    } else if (userRole === "teacher") {
+
+      isAuthorized = true;
+    } else if (role === "teacher") {
       // For teachers, validate that the requested subject is assigned to them
-      const subjectTeacher = await Staff.findById(userId).populate("subjects");
+      teacherId = userId;
+
+      const teacher = await Staff.findById(userId).populate(
+        "teacherRecords.subjects",
+      );
       if (!teacher) {
         throw new NotFoundError("Teacher not found.");
       }
 
-      isAuthorized = subjectTeacher.subjects.some(
-        (subjectItem) => subjectItem.toString() === subject.toString(),
+      const { term, session } = getCurrentTermDetails(
+        startTermGenerationDate,
+        holidayDurationForEachTerm,
+      );
+
+      const teacherRecord = teacher.teacherRecords.find(
+        (rec) => rec.term === term && rec.session === session,
+      );
+
+      if (!teacherRecord) {
+        throw new BadRequestError(
+          "Teacher has no record for current session/term.",
+        );
+      }
+
+      // Handle both populated subject docs and raw ObjectId values
+      isAuthorized = teacherRecord.subjects.some(
+        (subj) =>
+          (subj && subj._id ? subj._id.toString() : subj.toString()) ===
+          subject.toString(),
       );
 
       if (!isAuthorized) {
@@ -848,8 +900,6 @@ export const updateLessonNote = async (req, res, next) => {
           "You are not authorized to create lesson note for this subject.",
         );
       }
-
-      teacherId = userId;
     }
 
     if (!isAuthorized) {
@@ -859,7 +909,7 @@ export const updateLessonNote = async (req, res, next) => {
     }
 
     /*let teacherId = userId; // Default to logged-in user
-    if (["admin", "proprietor"].includes(userRole)) {
+    if (["admin", "proprietor"].includes(role)) {
       teacherId = teacher;
     }*/
 
@@ -896,11 +946,13 @@ export const updateLessonNote = async (req, res, next) => {
       throw new BadRequestError("Updater not found.");
     }
 
-    const classData = await Class.findOne({
-      _id: lessonNote.classId,
-      term: lessonNote.term,
-      session: lessonNote.session,
-    }).populate("subjects", "subjectName");
+    // Find the class by its id only. Class documents do not store term/session
+    // as part of the class record, so matching on term/session can cause
+    // the lookup to fail. Lookup by _id is sufficient to get class subjects.
+    const classData = await Class.findById(lessonNote.classId).populate(
+      "subjects",
+      "subjectName",
+    );
     if (!classData) {
       throw new NotFoundError("Class not found.");
     }
@@ -910,6 +962,11 @@ export const updateLessonNote = async (req, res, next) => {
     );
     if (!subjectData) {
       throw new NotFoundError("Subject data not found in class.");
+    }
+
+    // Ensure `content` is an array on updates too (backwards-compatible)
+    if (req.body.content && !Array.isArray(req.body.content)) {
+      req.body.content = [req.body.content];
     }
 
     // Find the lesson note by ID and update it
@@ -1015,18 +1072,42 @@ export const approveLessonNote = async (req, res, next) => {
       throw new BadRequestError("Updater not found.");
     }
 
-    const classData = await Class.findOne({
-      _id: req.body.classId,
-      term: req.body.term,
-      session: req.body.session,
-    }).populate("subjects", "subjectName");
+    // Find the class by its id. Matching on term/session may fail
+    // when class defaults differ from the lesson note's recorded
+    // term/session; use findById and warn if there's a mismatch.
+    const classData = await Class.findById(lessonNote.classId).populate(
+      "subjects",
+      "subjectName",
+    );
     if (!classData) {
       throw new NotFoundError("Class not found.");
     }
 
+    // Warn if term/session on the class differ from the lesson note
+    // (non-blocking; useful for diagnosing why a lesson note was
+    // created for a different term/session than the class defaults).
+    if (
+      classData.term &&
+      lessonNote.term &&
+      classData.term.toString() !== lessonNote.term.toString()
+    ) {
+      console.warn(
+        `Term mismatch during approval: class.term=${classData.term} vs lessonNote.term=${lessonNote.term}`,
+      );
+    }
+    if (
+      classData.session &&
+      lessonNote.session &&
+      classData.session.toString() !== lessonNote.session.toString()
+    ) {
+      console.warn(
+        `Session mismatch during approval: class.session=${classData.session} vs lessonNote.session=${lessonNote.session}`,
+      );
+    }
+
     // Find subject data from the class's subjects.
     const subjectData = classData.subjects.find(
-      (subj) => subj._id.toString() === subject.toString(),
+      (subj) => subj._id.toString() === lessonNote.subject.toString(),
     );
     if (!subjectData) {
       throw new NotFoundError("Subject data not found in class.");
@@ -1043,7 +1124,9 @@ export const approveLessonNote = async (req, res, next) => {
 
     const notificationMessage = `${classData.className} ${subjectData.subjectName} lesson note for week ${lessonNote.lessonWeek} on the topic ${lessonNote.topic}, subtopic ${lessonNote.subTopic} has been approved by the ${updater.role}: ${updater.firstName} ${updater.lastName}. Please check your portal for details.`;
 
-    const recipients = [lessonNote.teacher];
+    const recipients = [
+      { recipientId: lessonNote.teacher, recipientModel: "Staff" },
+    ];
 
     await sendBulkNotifications({
       sender: req.user.userId,
@@ -1062,8 +1145,114 @@ export const approveLessonNote = async (req, res, next) => {
       lessonNote,
     });
   } catch (error) {
-    console.error("Error approving lessonNote:", error);
-    next(new BadRequestError(error.message));
+    console.log("Error approving lessonNote:", error);
+    next(new InternalServerError(error.message));
+  }
+};
+
+// Update individual content array elements
+export const updateLessonNoteContent = async (req, res, next) => {
+  try {
+    const { id } = req.params; // Lesson note ID
+    const { id: userId, role } = req.user; // Authenticated user
+    const { action, index, value } = req.body; // action: "set" | "push" | "pull"; index (for set/pull); value (for set/push)
+
+    // Fetch the existing lesson note
+    const lessonNote = await LessonNote.findById(id).populate("teacher");
+    if (!lessonNote) {
+      throw new NotFoundError("Lesson note not found.");
+    }
+
+    // Authorization: only the teacher who created it or admin/proprietor can update content
+    if (
+      !["admin", "proprietor"].includes(role) &&
+      lessonNote.teacher.toString() !== userId
+    ) {
+      throw new UnauthorizedError(
+        "You are not authorized to update this lesson note's content.",
+      );
+    }
+
+    // Validate action
+    if (!["set", "push", "pull"].includes(action)) {
+      throw new BadRequestError(
+        "Invalid action. Use 'set', 'push', or 'pull'.",
+      );
+    }
+
+    let updateQuery;
+
+    if (action === "set") {
+      // Update element at specific index
+      if (index === undefined || index === null) {
+        throw new BadRequestError("Index is required for 'set' action.");
+      }
+      if (value === undefined || value === null) {
+        throw new BadRequestError("Value is required for 'set' action.");
+      }
+
+      updateQuery = {
+        $set: { [`content.${index}`]: value },
+      };
+    } else if (action === "push") {
+      // Add new element to array
+      if (value === undefined || value === null) {
+        throw new BadRequestError("Value is required for 'push' action.");
+      }
+
+      updateQuery = {
+        $push: { content: value },
+      };
+    } else if (action === "pull") {
+      // Remove element at specific index
+      if (index === undefined || index === null) {
+        throw new BadRequestError("Index is required for 'pull' action.");
+      }
+
+      // MongoDB doesn't have a direct "remove by index" operator,
+      // so we fetch, modify, and save
+      const updatedContent = lessonNote.content.filter(
+        (_, i) => i !== Number(index),
+      );
+      lessonNote.content = updatedContent;
+      await lessonNote.save();
+
+      const updatedLessonNote = await LessonNote.findById(id).populate([
+        { path: "teacher", select: "_id firstName lastName" },
+        { path: "classId", select: "_id className" },
+        { path: "subject", select: "_id subjectName" },
+      ]);
+
+      return res.status(StatusCodes.OK).json({
+        message: "Content element removed successfully.",
+        lessonNote: updatedLessonNote,
+      });
+    }
+
+    // Apply update for "set" or "push"
+    const updatedLessonNote = await LessonNote.findByIdAndUpdate(
+      id,
+      updateQuery,
+      { new: true, runValidators: true },
+    ).populate([
+      { path: "teacher", select: "_id firstName lastName" },
+      { path: "classId", select: "_id className" },
+      { path: "subject", select: "_id subjectName" },
+    ]);
+
+    const actionMessages = {
+      set: "Content element updated successfully.",
+      push: "Content element added successfully.",
+      pull: "Content element removed successfully.",
+    };
+
+    res.status(StatusCodes.OK).json({
+      message: actionMessages[action],
+      lessonNote: updatedLessonNote,
+    });
+  } catch (error) {
+    console.log("Error updating lesson note content:", error);
+    next(new InternalServerError(error.message));
   }
 };
 

@@ -21,7 +21,8 @@ import UnauthorizedError from "../errors/unauthorize.js";
 export const createAssignment = async (req, res, next) => {
   try {
     const { lessonNote, questions, marksObtainable } = req.body;
-    const { id: userId, role: userRole } = req.user;
+    const userId = req.user?.userId || req.user?.id;
+    const userRole = req.user?.role;
 
     // Validate required fields
     if (!questions || !Array.isArray(questions) || questions.length === 0) {
@@ -72,16 +73,24 @@ export const createAssignment = async (req, res, next) => {
       }
 
       // Validate that the subjectTeacher exists and is valid
-      const teacher = await Staff.findById(subjectTeacherId).populate(
-        "subjects",
-      );
+      const teacher = await Staff.findById(subjectTeacherId).populate({
+        path: "teacherRecords.subjects",
+        select: "_id subjectName",
+      });
       if (!teacher) {
         throw new NotFoundError("Provided subjectTeacher not found.");
       }
 
-      const isAssignedSubject = teacher.subjects.some(
-        (subjectItem) => subjectItem.toString() === subject.toString(),
+      // Flatten subjects from teacherRecords and normalize IDs
+      const teacherSubjects = (teacher.teacherRecords || []).flatMap((tr) =>
+        (tr.subjects || []).map((s) =>
+          s && s._id ? s._id.toString() : s.toString(),
+        ),
       );
+      const subjectId =
+        subject && subject._id ? subject._id.toString() : subject.toString();
+
+      const isAssignedSubject = teacherSubjects.includes(subjectId);
 
       if (!isAssignedSubject) {
         throw new BadRequestError(
@@ -89,14 +98,24 @@ export const createAssignment = async (req, res, next) => {
         );
       }
     } else if (userRole === "teacher") {
-      const teacher = await Staff.findById(userId).populate("subjects");
+      const teacher = await Staff.findById(userId).populate({
+        path: "teacherRecords.subjects",
+        select: "_id subjectName",
+      });
       if (!teacher) {
         throw new BadRequestError("Teacher not found.");
       }
 
-      isAuthorized = teacher.subjects.some(
-        (subjectItem) => subjectItem.toString() === subject.toString(),
+      const teacherSubjectsCurrent = (teacher.teacherRecords || []).flatMap(
+        (tr) =>
+          (tr.subjects || []).map((s) =>
+            s && s._id ? s._id.toString() : s.toString(),
+          ),
       );
+      const subjectIdCurrent =
+        subject && subject._id ? subject._id.toString() : subject.toString();
+
+      isAuthorized = teacherSubjectsCurrent.includes(subjectIdCurrent);
 
       if (!isAuthorized) {
         throw new BadRequestError(
@@ -121,6 +140,7 @@ export const createAssignment = async (req, res, next) => {
     }
 
     // Validate questions against the lesson note context
+    let totalMarks = 0;
     for (const [index, question] of questionDocs.entries()) {
       // console.log(`Validating question ${index + 1}: `, question);
       if (
@@ -134,7 +154,12 @@ export const createAssignment = async (req, res, next) => {
           } does not match the class, subject, or term.`,
         );
       }
+      // Sum up the marks from each question
+      totalMarks += question.marks || 0;
     }
+
+    // Set marksObtainable to the sum of all question marks
+    req.body.marksObtainable = totalMarks;
 
     // Fetch students for the class
     const classData = await Class.findById(classId).populate("students");
@@ -222,7 +247,7 @@ export const createAssignment = async (req, res, next) => {
     });
   } catch (error) {
     console.error("Error creating assignment:", error);
-    next(new BadRequestError(error.message));
+    next(new InternalServerError(error.message));
   }
 };
 
@@ -768,42 +793,33 @@ export const getAssignments = async (req, res, next) => {
 // Get assignment by ID
 export const getAssignmentById = async (req, res, next) => {
   try {
-    const assignment = await Assignment.findById(req.params.id);
-    /*     .populate([
-      { path: "questions", select: "_id questionType questionText options" },
-      {
-        path: "classId",
-        select: "_id className",
-      },
-      {
-        path: "subject",
-        select: "_id subjectName",
-      },
-      {
-        path: "subjectTeacher",
-        select: "_id firstName",
-      },
-      {
-        path: "lessonNote",
-        select: "_id lessonweek lessonPeriod",
-      },
-    ]); */
+    const assignment = await Assignment.findById(req.params.id)
+      .populate({
+        path: "questions",
+        select: "_id questionType questionText options files marks",
+      })
+      .populate({ path: "classId", select: "_id className" })
+      .populate({ path: "subject", select: "_id subjectName" })
+      .populate({ path: "subjectTeacher", select: "_id firstName lastName" })
+      .populate({ path: "lessonNote", select: "_id lessonWeek lessonPeriod" });
 
     if (!assignment) {
       throw new NotFoundError("Assignment not found.");
     }
 
-    res.status(StatusCodes.OK).json(assignment);
+    res.status(StatusCodes.OK).json({ ...assignment.toObject() });
   } catch (error) {
-    next(new BadRequestError(error.message));
+    console.log("Error getting assignment by ID:", error);
+    next(new InternalServerError(error.message));
   }
 };
 
 // Update an assignment
-export const updateAssignment = async (req, res) => {
+export const updateAssignment = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { id: userId, role: userRole } = req.user; // Authenticated user ID and role
+    const userId = req.user?.userId || req.user?.id;
+    const userRole = req.user?.role; // Authenticated user role
 
     const assignment = await Assignment.findById(id).populate("lessonNote");
     if (!assignment) {
@@ -826,16 +842,24 @@ export const updateAssignment = async (req, res) => {
         );
       }
 
-      const teacher = await Staff.findById(subjectTeacherId).populate([
-        { path: "subjects", select: "_id subjectName" },
-      ]);
+      const teacher = await Staff.findById(subjectTeacherId).populate({
+        path: "teacherRecords.subjects",
+        select: "_id subjectName",
+      });
       if (!teacher) {
         throw new NotFoundError("Provided subjectTeacher not found.");
       }
 
-      const isAssignedSubject = teacher.subjects.some(
-        (subjectItem) => subjectItem && subjectItem.equals(subject),
+      // Flatten subjects from teacherRecords and normalize IDs
+      const teacherSubjects = (teacher.teacherRecords || []).flatMap((tr) =>
+        (tr.subjects || []).map((s) =>
+          s && s._id ? s._id.toString() : s.toString(),
+        ),
       );
+      const subjectId =
+        subject && subject._id ? subject._id.toString() : subject.toString();
+
+      const isAssignedSubject = teacherSubjects.includes(subjectId);
 
       if (!isAssignedSubject) {
         throw new BadRequestError(
@@ -843,15 +867,26 @@ export const updateAssignment = async (req, res) => {
         );
       }
     } else if (userRole === "teacher") {
-      const teacher = await Staff.findById(userId).populate("subjects");
+      const teacher = await Staff.findById(userId).populate({
+        path: "teacherRecords.subjects",
+        select: "_id subjectName",
+      });
       if (!teacher) {
         throw new NotFoundError("Teacher not found.");
       }
 
-      // Check if the teacher is authorized for this test's subject
-      isAuthorized = teacher.subjects.some(
-        (subjectItem) => subjectItem.toString() === subject.toString(),
+      // Flatten subjects from teacherRecords and normalize IDs
+      const teacherSubjectsCurrent = (teacher.teacherRecords || []).flatMap(
+        (tr) =>
+          (tr.subjects || []).map((s) =>
+            s && s._id ? s._id.toString() : s.toString(),
+          ),
       );
+      const subjectIdCurrent =
+        subject && subject._id ? subject._id.toString() : subject.toString();
+
+      // Check if the teacher is authorized for this assignment's subject
+      isAuthorized = teacherSubjectsCurrent.includes(subjectIdCurrent);
 
       if (!isAuthorized) {
         throw new BadRequestError(
@@ -941,7 +976,8 @@ export const updateAssignment = async (req, res) => {
       updatedAssignment,
     });
   } catch (error) {
-    next(new BadRequestError(error.message));
+    console.log("Error updating assignment:", error);
+    next(new InternalServerError(error.message));
   }
 };
 
@@ -1085,6 +1121,150 @@ export const updateAssignment = async (req, res) => {
   }
 }; */
 
+// Update questions list on an Assignment (set by index, push question, or pull by index)
+export const updateAssignmentQuestionList = async (req, res, next) => {
+  try {
+    const { id } = req.params; // assignment id
+    const { action, index, value } = req.body;
+
+    if (!action || !["set", "push", "pull"].includes(action)) {
+      throw new BadRequestError(
+        "Invalid or missing action. Use 'set', 'push' or 'pull'.",
+      );
+    }
+
+    const assignment = await Assignment.findById(id);
+    if (!assignment) throw new NotFoundError("Assignment not found.");
+
+    // Authorization: subjectTeacher or admin/proprietor
+    const userId = req.user?.userId || req.user?.id;
+    const userRole = req.user?.role;
+    if (!userId || !userRole)
+      throw new BadRequestError("User authentication required.");
+
+    const isOwner = assignment.subjectTeacher
+      ? assignment.subjectTeacher.toString() === userId.toString()
+      : false;
+    if (!(isOwner || userRole === "admin" || userRole === "proprietor")) {
+      throw new BadRequestError(
+        "You are not authorized to modify questions for this assignment.",
+      );
+    }
+
+    let updatedAssignment;
+
+    if (action === "set") {
+      if (typeof index !== "number" || index < 0) {
+        throw new BadRequestError(
+          "For 'set' action provide a valid non-negative numeric 'index'.",
+        );
+      }
+      if (!value)
+        throw new BadRequestError(
+          "For 'set' action provide a 'value' (question id).",
+        );
+
+      // validate question exists and matches assignment context
+      const q = await Question.findById(value);
+      if (!q) throw new NotFoundError("Provided question not found.");
+      if (
+        q.subject.toString() !== assignment.subject.toString() ||
+        q.classId.toString() !== assignment.classId.toString() ||
+        q.term.toString().toLowerCase() !==
+          assignment.term.toString().toLowerCase()
+      ) {
+        throw new BadRequestError(
+          "Question does not match assignment subject, class or term.",
+        );
+      }
+
+      const update = { $set: {} };
+      update.$set[`questions.${index}`] = value;
+      updatedAssignment = await Assignment.findByIdAndUpdate(id, update, {
+        new: true,
+        runValidators: true,
+      }).populate([
+        {
+          path: "questions",
+          select: "_id questionType questionText options files",
+        },
+        { path: "classId", select: "_id className" },
+        { path: "subject", select: "_id subjectName" },
+        { path: "subjectTeacher", select: "_id firstName" },
+        { path: "lessonNote", select: "_id lessonweek lessonPeriod" },
+      ]);
+    } else if (action === "push") {
+      if (!value)
+        throw new BadRequestError(
+          "For 'push' action provide a 'value' (question id) to append.",
+        );
+
+      const q = await Question.findById(value);
+      if (!q) throw new NotFoundError("Provided question not found.");
+      if (
+        q.subject.toString() !== assignment.subject.toString() ||
+        q.classId.toString() !== assignment.classId.toString() ||
+        q.term.toString().toLowerCase() !==
+          assignment.term.toString().toLowerCase()
+      ) {
+        throw new BadRequestError(
+          "Question does not match assignment subject, class or term.",
+        );
+      }
+
+      updatedAssignment = await Assignment.findByIdAndUpdate(
+        id,
+        { $push: { questions: value } },
+        { new: true, runValidators: true },
+      ).populate([
+        {
+          path: "questions",
+          select: "_id questionType questionText options files",
+        },
+        { path: "classId", select: "_id className" },
+        { path: "subject", select: "_id subjectName" },
+        { path: "subjectTeacher", select: "_id firstName" },
+        { path: "lessonNote", select: "_id lessonweek lessonPeriod" },
+      ]);
+    } else if (action === "pull") {
+      if (typeof index !== "number" || index < 0) {
+        throw new BadRequestError(
+          "For 'pull' action provide a valid non-negative numeric 'index'.",
+        );
+      }
+
+      const doc = await Assignment.findById(id);
+      if (!doc) throw new NotFoundError("Assignment not found.");
+      const arr = Array.isArray(doc.questions) ? doc.questions.slice() : [];
+      if (index >= arr.length)
+        throw new BadRequestError("Index out of range for questions array.");
+      arr.splice(index, 1);
+      doc.questions = arr;
+      updatedAssignment = await doc.save();
+      updatedAssignment = await Assignment.findById(
+        updatedAssignment._id,
+      ).populate([
+        {
+          path: "questions",
+          select: "_id questionType questionText options files",
+        },
+        { path: "classId", select: "_id className" },
+        { path: "subject", select: "_id subjectName" },
+        { path: "subjectTeacher", select: "_id firstName" },
+        { path: "lessonNote", select: "_id lessonweek lessonPeriod" },
+      ]);
+    }
+
+    res.status(StatusCodes.OK).json({
+      message: `Questions list ${action} operation successful.`,
+      assignment: updatedAssignment,
+    });
+  } catch (error) {
+    console.log("Error updating assignment questions:", error);
+    next(new InternalServerError(error.message));
+  }
+};
+
 export const submitAssignment = async (req, res, next) => {
   try {
     const { id } = req.params;
@@ -1167,7 +1347,8 @@ export const deleteAssignment = async (req, res, next) => {
     if (!id) {
       throw new BadRequestError("Assignment ID is required.");
     }
-    const { userId, userRole } = req.user;
+    const { userId, userRole, role } = req.user;
+    const userRoleValue = userRole || role;
 
     // Find the Assignment document
     const assignment = await Assignment.findById(id);
@@ -1175,11 +1356,14 @@ export const deleteAssignment = async (req, res, next) => {
       throw new NotFoundError("Assignment not found.");
     }
 
-    if (
-      (assignment.subjectTeacher !== userId && userRole !== "teacher") ||
-      userRole !== "admin" ||
-      userRole !== "proprietor"
-    ) {
+    // Authorization: Allow deletion if user is the subjectTeacher, or is admin/proprietor
+    const isSubjectTeacher =
+      assignment.subjectTeacher &&
+      assignment.subjectTeacher.toString() ===
+        (userId || req.user?.userId).toString();
+    const isAdmin = ["admin", "proprietor"].includes(userRoleValue);
+
+    if (!isSubjectTeacher && !isAdmin) {
       throw new UnauthorizedError(
         "You are not authorized to delete this assignment.",
       );
@@ -1224,7 +1408,7 @@ export const deleteAssignment = async (req, res, next) => {
       }),
     ];
 
-    await sendBulkNotifications({
+    /*  await sendBulkNotifications({
       sender: req.user.userId,
       title: "Assignment Deleted",
       message: notificationMessage,
@@ -1233,7 +1417,7 @@ export const deleteAssignment = async (req, res, next) => {
         broadcastId: new mongoose.Types.ObjectId(),
         lessonNoteId: lessonNoteDoc._id,
       },
-    });
+    }); */
 
     // Delete the Assignment document
     await Assignment.findByIdAndDelete(id);
@@ -1243,6 +1427,6 @@ export const deleteAssignment = async (req, res, next) => {
       .json({ message: "Assignment deleted successfully." });
   } catch (error) {
     console.log("Error deleting assignment:", error);
-    next(new BadRequestError(error.message));
+    next(new InternalServerError(error.message));
   }
 };

@@ -38,6 +38,15 @@ router.patch(
   authorizeRole("admin", "proprietor", "teacher"),
   testController.updateTest,
 );
+
+router.patch(
+  "/:id/questionslist",
+  authenticateToken,
+  checkStatus,
+  authorizeRole("admin", "proprietor", "teacher"),
+  testController.updateTestQuestionList,
+);
+
 router.delete(
   "/:id",
   authenticateToken,

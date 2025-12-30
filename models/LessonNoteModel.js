@@ -77,10 +77,12 @@ const lessonNoteSchema = new mongoose.Schema({
       required: true,
     },
   ],
-  content: {
-    type: String,
-    required: true,
-  },
+  content: [
+    {
+      type: mongoose.Schema.Types.Mixed,
+      required: true,
+    },
+  ],
   evaluation: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "Classwork",

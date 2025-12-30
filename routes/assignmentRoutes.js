@@ -48,6 +48,14 @@ router.patch(
   assignmentController.updateAssignment,
 );
 
+router.patch(
+  "/:id/questionslist",
+  authenticateToken,
+  checkStatus,
+  authorizeRole("admin", "proprietor", "teacher"),
+  assignmentController.updateAssignmentQuestionList,
+);
+
 router.delete(
   "/:id",
   authenticateToken,

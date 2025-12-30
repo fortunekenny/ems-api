@@ -10,6 +10,17 @@ import StudentAnswer from "../models/StudentAnswerModel.js"; // Adjust the path 
 import BadRequestError from "../errors/bad-request.js";
 import NotFoundError from "../errors/not-found.js";
 import InternalServerError from "../errors/internal-server-error.js";
+// import { lineTo } from "pdfkit/js/mixins/vector";
+import {
+  getCurrentTermDetails,
+  startTermGenerationDate, // Ensure this is correctly defined
+  holidayDurationForEachTerm, // Ensure this is correctly defined
+} from "../utils/termGenerator.js";
+
+const { session, term } = getCurrentTermDetails(
+  startTermGenerationDate,
+  holidayDurationForEachTerm,
+);
 
 export const createExam = async (req, res, next) => {
   try {
@@ -20,14 +31,19 @@ export const createExam = async (req, res, next) => {
       students,
       submitted,
       date,
-      marksObtainable,
+      /* marksObtainable, */
       startTime,
       durationTime,
-      term,
-      session,
+      term: reqTerm,
+      session: reqSession,
     } = req.body;
 
-    const { id: userId, role: userRole } = req.user; // Authenticated user ID and role
+    // Use provided term/session from request, fallback to current term/session
+    const examTerm = reqTerm || term;
+    const examSession = reqSession || session;
+
+    const userId = req.user?.userId || req.user?.id;
+    const userRole = req.user?.role;
 
     // Validate required fields
     if (
@@ -38,9 +54,9 @@ export const createExam = async (req, res, next) => {
       questions.length === 0 ||
       !date ||
       !startTime ||
-      !durationTime
+      !durationTime //||
       //||
-      //!marksObtainable
+      /* !marksObtainable */
     ) {
       throw new BadRequestError("All required fields must be provided.");
     }
@@ -59,16 +75,24 @@ export const createExam = async (req, res, next) => {
         );
       }
 
-      const teacher = await Staff.findById(subjectTeacherId).populate([
-        { path: "subjects", select: "_id subjectName" },
-      ]);
+      const teacher = await Staff.findById(subjectTeacherId).populate({
+        path: "teacherRecords.subjects",
+        select: "_id subjectName",
+      });
       if (!teacher) {
         throw new NotFoundError("Provided subjectTeacher not found.");
       }
 
-      const isAssignedSubject = teacher.subjects.some(
-        (subjectItem) => subjectItem && subjectItem.equals(subject),
+      // Flatten subjects from teacherRecords and normalize IDs
+      const teacherSubjects = (teacher.teacherRecords || []).flatMap((tr) =>
+        (tr.subjects || []).map((s) =>
+          s && s._id ? s._id.toString() : s.toString(),
+        ),
       );
+      const subjectId =
+        subject && subject._id ? subject._id.toString() : subject.toString();
+
+      const isAssignedSubject = teacherSubjects.includes(subjectId);
 
       if (!isAssignedSubject) {
         throw new BadRequestError(
@@ -76,14 +100,24 @@ export const createExam = async (req, res, next) => {
         );
       }
     } else if (userRole === "teacher") {
-      const teacher = await Staff.findById(userId).populate("subjects");
+      const teacher = await Staff.findById(userId).populate({
+        path: "teacherRecords.subjects",
+        select: "_id subjectName",
+      });
       if (!teacher) {
         throw new NotFoundError("Teacher not found.");
       }
 
-      isAuthorized = teacher.subjects.some(
-        (subjectItem) => subjectItem.toString() === subject.toString(),
+      const teacherSubjectsCurrent = (teacher.teacherRecords || []).flatMap(
+        (tr) =>
+          (tr.subjects || []).map((s) =>
+            s && s._id ? s._id.toString() : s.toString(),
+          ),
       );
+      const subjectIdCurrent =
+        subject && subject._id ? subject._id.toString() : subject.toString();
+
+      isAuthorized = teacherSubjectsCurrent.includes(subjectIdCurrent);
 
       if (!isAuthorized) {
         throw new BadRequestError(
@@ -108,6 +142,44 @@ export const createExam = async (req, res, next) => {
     students = classData.students.map((student) => student._id);
     submitted = [];
 
+    // Fetch and validate questions BEFORE saving the exam
+    const questionDocs = await Question.find({ _id: { $in: questions } });
+
+    if (questionDocs.length !== questions.length) {
+      throw new BadRequestError("Some questions could not be found.");
+    }
+
+    // Calculate total marks from questions
+    let totalQuestionMarks = 0;
+    for (const [index, question] of questionDocs.entries()) {
+      // Perform validations
+      if (!question.subject || !question.classId || !question.term) {
+        throw new BadRequestError(
+          `Question at index ${
+            index + 1
+          } is missing subject, classId, or term field.`,
+        );
+      }
+      if (
+        question.subject.toString() !== subject.toString() ||
+        question.classId.toString() !== classId.toString() ||
+        (examTerm &&
+          question.term.toString().toLowerCase() !==
+            examTerm.toString().toLowerCase())
+      ) {
+        throw new BadRequestError(
+          `Question at index ${
+            index + 1
+          } does not match the class, subject, or term.`,
+        );
+      }
+      // Sum up the marks from each question
+      totalQuestionMarks += question.marks || 0;
+    }
+
+    // Set marksObtainable to the sum of all question marks
+    let marksObtainable = totalQuestionMarks;
+
     // Create the exam
     const exam = new Exam({
       subjectTeacher: subjectTeacherId,
@@ -120,34 +192,11 @@ export const createExam = async (req, res, next) => {
       date,
       startTime,
       durationTime,
-      term,
-      session,
+      term: examTerm,
+      session: examSession,
     });
 
     await exam.save();
-
-    // Fetch and validate questions
-    const questionDocs = await Question.find({ _id: { $in: questions } });
-
-    if (questionDocs.length !== questions.length) {
-      throw new BadRequestError("Some questions could not be found.");
-    }
-
-    for (const [index, question] of questionDocs.entries()) {
-      // Perform validations using saved `exam` fields (e.g., `term`)
-      if (
-        question.subject.toString() !== exam.subject.toString() ||
-        question.classId.toString() !== exam.classId.toString() ||
-        question.term.toString().toLowerCase() !==
-          exam.term.toString().toLowerCase()
-      ) {
-        throw new BadRequestError(
-          `Question at index ${
-            index + 1
-          } does not match the class, subject, or term.`,
-        );
-      }
-    }
 
     const populatedExam = await Exam.findById(exam._id).populate([
       {
@@ -164,8 +213,8 @@ export const createExam = async (req, res, next) => {
       exam: populatedExam,
     });
   } catch (error) {
-    console.error("Error creating test:", error);
-    next(new BadRequestError(error.message));
+    console.error("Error creating exam:", error);
+    next(new InternalServerError(error.message));
   }
 };
 
@@ -365,6 +414,7 @@ export const getExams = async (req, res, next) => {
       exams,
     });
   } catch (error) {
+    console.error("Error getting exams:", error);
     next(new InternalServerError(error.message));
   }
 };
@@ -374,21 +424,21 @@ export const getExamById = async (req, res, next) => {
   try {
     const { id } = req.params;
 
-    const exam = await Exam.findById(id).populate([
-      {
+    const exam = await Exam.findById(id)
+      .populate({
         path: "questions",
-        select: "_id questionType questionText options files",
-      },
-      { path: "classId", select: "_id className" },
-      { path: "subject", select: "_id subjectName" },
-      { path: "subjectTeacher", select: "_id name" },
-    ]);
+        select: "_id questionType questionText options files marks",
+      })
+      .populate({ path: "classId", select: "_id className" })
+      .populate({ path: "subject", select: "_id subjectName" })
+      .populate({ path: "subjectTeacher", select: "_id firstName lastName" });
     if (!exam) {
       throw new NotFoundError("Exam not found.");
     }
-    res.status(StatusCodes.OK).json(exam);
+    res.status(StatusCodes.OK).json({ ...exam.toObject() });
   } catch (error) {
-    next(new BadRequestError(error.message));
+    console.error("Error getting exam by ID:", error);
+    next(new InternalServerError(error.message));
   }
 };
 
@@ -396,7 +446,8 @@ export const getExamById = async (req, res, next) => {
 export const updateExam = async (req, res, next) => {
   try {
     const { id } = req.params; // Exam ID from request params
-    const { id: userId, role: userRole } = req.user; // Authenticated user ID and role
+    const userId = req.user?.userId || req.user?.id;
+    const userRole = req.user?.role;
 
     // Find the exam to be updated
     const exam = await Exam.findById(id).populate("subjectTeacher");
@@ -421,16 +472,24 @@ export const updateExam = async (req, res, next) => {
         );
       }
 
-      const teacher = await Staff.findById(subjectTeacherId).populate([
-        { path: "subjects", select: "_id subjectName" },
-      ]);
+      const teacher = await Staff.findById(subjectTeacherId).populate({
+        path: "teacherRecords.subjects",
+        select: "_id subjectName",
+      });
       if (!teacher) {
         throw new NotFoundError("Provided subjectTeacher not found.");
       }
 
-      const isAssignedSubject = teacher.subjects.some(
-        (subjectItem) => subjectItem && subjectItem.equals(subject),
+      // Flatten subjects from teacherRecords and normalize IDs
+      const teacherSubjects = (teacher.teacherRecords || []).flatMap((tr) =>
+        (tr.subjects || []).map((s) =>
+          s && s._id ? s._id.toString() : s.toString(),
+        ),
       );
+      const subjectId =
+        subject && subject._id ? subject._id.toString() : subject.toString();
+
+      const isAssignedSubject = teacherSubjects.includes(subjectId);
 
       if (!isAssignedSubject) {
         throw new BadRequestError(
@@ -438,14 +497,24 @@ export const updateExam = async (req, res, next) => {
         );
       }
     } else if (userRole === "teacher") {
-      const teacher = await Staff.findById(userId).populate("subjects");
+      const teacher = await Staff.findById(userId).populate({
+        path: "teacherRecords.subjects",
+        select: "_id subjectName",
+      });
       if (!teacher) {
         throw new NotFoundError("Teacher not found.");
       }
 
-      isAuthorized = teacher.subjects.some(
-        (subjectItem) => subjectItem.toString() === subject.toString(),
+      const teacherSubjectsCurrent = (teacher.teacherRecords || []).flatMap(
+        (tr) =>
+          (tr.subjects || []).map((s) =>
+            s && s._id ? s._id.toString() : s.toString(),
+          ),
       );
+      const subjectIdCurrent =
+        subject && subject._id ? subject._id.toString() : subject.toString();
+
+      isAuthorized = teacherSubjectsCurrent.includes(subjectIdCurrent);
 
       if (!isAuthorized) {
         throw new BadRequestError(
@@ -501,7 +570,8 @@ export const updateExam = async (req, res, next) => {
       updatedExam,
     });
   } catch (error) {
-    next(new BadRequestError(error.message));
+    console.error("Error updating exam:", error);
+    next(new InternalServerError(error.message));
   }
 };
 
@@ -602,6 +672,143 @@ export const getExamDetailsWithAnswers = async (req, res, next) => {
   }
 };
 
+// Update questions list on an Exam (set by index, push question, or pull by index)
+export const updateExamQuestionList = async (req, res, next) => {
+  try {
+    const { id } = req.params; // exam id
+    const { action, index, value } = req.body;
+
+    if (!action || !["set", "push", "pull"].includes(action)) {
+      throw new BadRequestError(
+        "Invalid or missing action. Use 'set', 'push' or 'pull'.",
+      );
+    }
+
+    const exam = await Exam.findById(id);
+    if (!exam) throw new NotFoundError("Exam not found.");
+
+    // Authorization: subjectTeacher or admin/proprietor
+    const userId = req.user?.userId || req.user?.id;
+    const userRole = req.user?.role;
+    if (!userId || !userRole)
+      throw new BadRequestError("User authentication required.");
+
+    const isOwner = exam.subjectTeacher
+      ? exam.subjectTeacher.toString() === userId.toString()
+      : false;
+    if (!(isOwner || userRole === "admin" || userRole === "proprietor")) {
+      throw new BadRequestError(
+        "You are not authorized to modify questions for this exam.",
+      );
+    }
+
+    let updatedExam;
+
+    if (action === "set") {
+      if (typeof index !== "number" || index < 0) {
+        throw new BadRequestError(
+          "For 'set' action provide a valid non-negative numeric 'index'.",
+        );
+      }
+      if (!value)
+        throw new BadRequestError(
+          "For 'set' action provide a 'value' (question id).",
+        );
+
+      // validate question exists and matches exam context
+      const q = await Question.findById(value);
+      if (!q) throw new NotFoundError("Provided question not found.");
+      if (
+        q.subject.toString() !== exam.subject.toString() ||
+        q.classId.toString() !== exam.classId.toString() ||
+        q.term.toString().toLowerCase() !== exam.term.toString().toLowerCase()
+      ) {
+        throw new BadRequestError(
+          "Question does not match exam subject, class or term.",
+        );
+      }
+
+      const update = { $set: {} };
+      update.$set[`questions.${index}`] = value;
+      updatedExam = await Exam.findByIdAndUpdate(id, update, {
+        new: true,
+        runValidators: true,
+      }).populate([
+        {
+          path: "questions",
+          select: "_id questionType questionText options files marks",
+        },
+        { path: "classId", select: "_id className" },
+        { path: "subject", select: "_id subjectName" },
+        { path: "subjectTeacher", select: "_id firstName lastName" },
+      ]);
+    } else if (action === "push") {
+      if (!value)
+        throw new BadRequestError(
+          "For 'push' action provide a 'value' (question id) to append.",
+        );
+
+      const q = await Question.findById(value);
+      if (!q) throw new NotFoundError("Provided question not found.");
+      if (
+        q.subject.toString() !== exam.subject.toString() ||
+        q.classId.toString() !== exam.classId.toString() ||
+        q.term.toString().toLowerCase() !== exam.term.toString().toLowerCase()
+      ) {
+        throw new BadRequestError(
+          "Question does not match exam subject, class or term.",
+        );
+      }
+
+      updatedExam = await Exam.findByIdAndUpdate(
+        id,
+        { $push: { questions: value } },
+        { new: true, runValidators: true },
+      ).populate([
+        {
+          path: "questions",
+          select: "_id questionType questionText options files marks",
+        },
+        { path: "classId", select: "_id className" },
+        { path: "subject", select: "_id subjectName" },
+        { path: "subjectTeacher", select: "_id firstName lastName" },
+      ]);
+    } else if (action === "pull") {
+      if (typeof index !== "number" || index < 0) {
+        throw new BadRequestError(
+          "For 'pull' action provide a valid non-negative numeric 'index'.",
+        );
+      }
+
+      const doc = await Exam.findById(id);
+      if (!doc) throw new NotFoundError("Exam not found.");
+      const arr = Array.isArray(doc.questions) ? doc.questions.slice() : [];
+      if (index >= arr.length)
+        throw new BadRequestError("Index out of range for questions array.");
+      arr.splice(index, 1);
+      doc.questions = arr;
+      updatedExam = await doc.save();
+      updatedExam = await Exam.findById(updatedExam._id).populate([
+        {
+          path: "questions",
+          select: "_id questionType questionText options files marks",
+        },
+        { path: "classId", select: "_id className" },
+        { path: "subject", select: "_id subjectName" },
+        { path: "subjectTeacher", select: "_id firstName lastName" },
+      ]);
+    }
+
+    res.status(StatusCodes.OK).json({
+      message: `Questions list ${action} operation successful.`,
+      exam: updatedExam,
+    });
+  } catch (error) {
+    console.error("Error updating exam questions:", error);
+    next(new BadRequestError(error.message));
+  }
+};
+
 /*export const getExamWithAnswers = async (req, res, next) => {
   try {
     const { id } = req.params; // Exam ID
@@ -671,7 +878,8 @@ export const deleteExam = async (req, res) => {
 
     res.status(StatusCodes.OK).json({ message: "Exam deleted successfully." });
   } catch (error) {
-    next(new BadRequestError(error.message));
+    console.error("Error deleting exam:", error);
+    next(new InternalServerError(error.message));
   }
 };
 

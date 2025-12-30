@@ -4,6 +4,7 @@ import {
   getAllQuestions,
   getQuestionsByLessonNote,
   getQuestionById,
+  updateQuestionOption,
   updateQuestion,
   deleteQuestion,
 } from "../controllers/questionController.js";
@@ -68,6 +69,14 @@ router.patch(
   authorizeRole("admin", "teacher", "proprietor"),
   upload.array("files", 5), // Middleware to handle file uploads
   updateQuestion,
+);
+// Route to update a question options
+router.patch(
+  "/:id/options",
+  authenticateToken,
+  checkStatus,
+  authorizeRole("admin", "teacher", "proprietor"),
+  updateQuestionOption,
 );
 /*router.patch(
   "/:id",

@@ -41,7 +41,7 @@ router.get(
   getAllStudentsAnswer,
 );
 router.get(
-  "/:studentAnswerId",
+  "/:id",
   authenticateToken,
   checkStatus,
   authorizeRole("admin", "teacher", "proprietor", "student", "parent"),

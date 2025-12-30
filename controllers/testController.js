@@ -10,6 +10,11 @@ import StudentAnswer from "../models/StudentAnswerModel.js"; // Adjust the path 
 import BadRequestError from "../errors/bad-request.js";
 import NotFoundError from "../errors/not-found.js";
 import InternalServerError from "../errors/internal-server-error.js";
+import {
+  getCurrentTermDetails,
+  startTermGenerationDate,
+  holidayDurationForEachTerm,
+} from "../utils/termGenerator.js";
 
 export const createTest = async (req, res, next) => {
   try {
@@ -28,9 +33,22 @@ export const createTest = async (req, res, next) => {
       term,
     } = req.body;
 
-    // console.log("test context: ", { subject, classId, term, session });
+    const userId = req.user?.userId || req.user?.id;
+    const userRole = req.user?.role;
 
-    const { id: userId, role: userRole } = req.user; // Authenticated user ID and role
+    // Get term and session from getCurrentTermDetails if not provided
+    const termDetails = getCurrentTermDetails(
+      startTermGenerationDate,
+      holidayDurationForEachTerm,
+    );
+
+    // Use provided term/session or fallback to current term details
+    if (!term) {
+      term = termDetails.term;
+    }
+    if (!session) {
+      session = termDetails.session;
+    }
 
     // Validate required fields
     if (
@@ -41,10 +59,11 @@ export const createTest = async (req, res, next) => {
       questions.length === 0 ||
       !date ||
       !startTime ||
-      !durationTime //||
-      // !marksObtainable
+      !durationTime
     ) {
-      throw new BadRequestError("All required fields must be provided.");
+      throw new BadRequestError(
+        "All required fields (classId, subject, questions, date, startTime, durationTime) must be provided.",
+      );
     }
 
     let subjectTeacherId;
@@ -61,16 +80,24 @@ export const createTest = async (req, res, next) => {
         );
       }
 
-      const teacher = await Staff.findById(subjectTeacherId).populate([
-        { path: "subjects", select: "_id subjectName" },
-      ]);
+      const teacher = await Staff.findById(subjectTeacherId).populate({
+        path: "teacherRecords.subjects",
+        select: "_id subjectName",
+      });
       if (!teacher) {
         throw new NotFoundError("Provided subjectTeacher not found.");
       }
 
-      const isAssignedSubject = teacher.subjects.some(
-        (subjectItem) => subjectItem && subjectItem.equals(subject),
+      // Flatten subjects from teacherRecords and normalize IDs
+      const teacherSubjects = (teacher.teacherRecords || []).flatMap((tr) =>
+        (tr.subjects || []).map((s) =>
+          s && s._id ? s._id.toString() : s.toString(),
+        ),
       );
+      const subjectId =
+        subject && subject._id ? subject._id.toString() : subject.toString();
+
+      const isAssignedSubject = teacherSubjects.includes(subjectId);
 
       if (!isAssignedSubject) {
         throw new BadRequestError(
@@ -78,14 +105,24 @@ export const createTest = async (req, res, next) => {
         );
       }
     } else if (userRole === "teacher") {
-      const teacher = await Staff.findById(userId).populate("subjects");
+      const teacher = await Staff.findById(userId).populate({
+        path: "teacherRecords.subjects",
+        select: "_id subjectName",
+      });
       if (!teacher) {
         throw new NotFoundError("Teacher not found.");
       }
 
-      isAuthorized = teacher.subjects.some(
-        (subjectItem) => subjectItem.toString() === subject.toString(),
+      const teacherSubjectsCurrent = (teacher.teacherRecords || []).flatMap(
+        (tr) =>
+          (tr.subjects || []).map((s) =>
+            s && s._id ? s._id.toString() : s.toString(),
+          ),
       );
+      const subjectIdCurrent =
+        subject && subject._id ? subject._id.toString() : subject.toString();
+
+      isAuthorized = teacherSubjectsCurrent.includes(subjectIdCurrent);
 
       if (!isAuthorized) {
         throw new BadRequestError(
@@ -106,12 +143,49 @@ export const createTest = async (req, res, next) => {
     const classData = await Class.findById(req.body.classId).populate(
       "students",
     );
+
     if (!classData || !classData.students.length) {
       throw new BadRequestError("Class or students not found.");
     }
 
     students = classData.students.map((student) => student._id);
     submitted = [];
+
+    // Fetch and validate questions BEFORE saving the test
+    const questionDocs = await Question.find({ _id: { $in: questions } });
+
+    if (questionDocs.length !== questions.length) {
+      throw new BadRequestError("Some questions could not be found.");
+    }
+
+    // Calculate total marks from questions
+    let totalQuestionMarks = 0;
+    for (const [index, question] of questionDocs.entries()) {
+      // Defensive checks for required fields
+      if (!question.subject || !question.classId || !question.term) {
+        throw new BadRequestError(
+          `Question at index ${
+            index + 1
+          } is missing subject, classId, or term.`,
+        );
+      }
+      if (
+        question.subject.toString() !== subject.toString() ||
+        question.classId.toString() !== classId.toString() ||
+        question.term.toString().toLowerCase() !== term.toString().toLowerCase()
+      ) {
+        throw new BadRequestError(
+          `Question at index ${
+            index + 1
+          } does not match the class, subject, or term.`,
+        );
+      }
+      // Sum up the marks from each question
+      totalQuestionMarks += question.marks || 0;
+    }
+
+    // Set marksObtainable to the sum of all question marks
+    marksObtainable = totalQuestionMarks;
 
     // Fetch existing tests for the same subject, term, and class
     const existingTests = await Test.find({
@@ -151,29 +225,6 @@ export const createTest = async (req, res, next) => {
     });
 
     await test.save();
-
-    // Fetch and validate questions
-    const questionDocs = await Question.find({ _id: { $in: questions } });
-
-    if (questionDocs.length !== questions.length) {
-      throw new BadRequestError("Some questions could not be found.");
-    }
-
-    for (const [index, question] of questionDocs.entries()) {
-      // Perform validations using saved `test` fields (e.g., `term`)
-      if (
-        question.subject.toString() !== test.subject.toString() ||
-        question.classId.toString() !== test.classId.toString() ||
-        question.term.toString().toLowerCase() !==
-          test.term.toString().toLowerCase()
-      ) {
-        throw new BadRequestError(
-          `Question at index ${
-            index + 1
-          } does not match the class, subject, or term.`,
-        );
-      }
-    }
 
     const populatedTest = await Test.findById(test._id).populate([
       {
@@ -393,20 +444,18 @@ export const getTestById = async (req, res, next) => {
   try {
     const { id } = req.params;
 
-    const test = await Test.findById(id).populate([
-      {
+    const test = await Test.findById(id)
+      .populate({
         path: "questions",
         select: "_id questionType questionText options files",
-      },
-      { path: "classId", select: "_id className" },
-      { path: "subject", select: "_id subjectName" },
-      { path: "subjectTeacher", select: "_id name" },
-      // { path: "students", select: "_id firstName lastName" },
-    ]);
+      })
+      .populate({ path: "classId", select: "_id className" })
+      .populate({ path: "subject", select: "_id subjectName" })
+      .populate({ path: "subjectTeacher", select: "_id name" });
     if (!test) {
       throw new NotFoundError("Test not found.");
     }
-    res.status(StatusCodes.OK).json(test);
+    res.status(StatusCodes.OK).json({ ...test.toObject() });
   } catch (error) {
     console.error("Error getting test:", error);
     next(new InternalServerError(error.message));
@@ -418,7 +467,8 @@ export const getTestById = async (req, res, next) => {
 export const updateTest = async (req, res, next) => {
   try {
     const { id } = req.params; // Test ID from request params
-    const { id: userId, role: userRole } = req.user; // Authenticated user ID and role
+    const userId = req.user?.userId || req.user?.id;
+    const userRole = req.user?.role;
 
     // Find the test to be updated
     const test = await Test.findById(id).populate("subjectTeacher");
@@ -452,16 +502,25 @@ export const updateTest = async (req, res, next) => {
       //   );
       // }
     } else if (userRole === "teacher") {
-      const teacher = await Staff.findById(userId).populate("subjects");
+      const teacher = await Staff.findById(userId).populate({
+        path: "teacherRecords.subjects",
+        select: "_id subjectName",
+      });
       if (!teacher) {
         throw new NotFoundError("Teacher not found.");
       }
 
-      // Check if the teacher is authorized for this test's subject
-
-      isAuthorized = teacher.subjects.some(
-        (subjectItem) => subjectItem.toString() === subject.toString(),
+      const teacherSubjectsCurrent = (teacher.teacherRecords || []).flatMap(
+        (tr) =>
+          (tr.subjects || []).map((s) =>
+            s && s._id ? s._id.toString() : s.toString(),
+          ),
       );
+      const subjectIdCurrent =
+        subject && subject._id ? subject._id.toString() : subject.toString();
+
+      // Check if the teacher is authorized for this test's subject
+      isAuthorized = teacherSubjectsCurrent.includes(subjectIdCurrent);
 
       if (!isAuthorized) {
         throw new BadRequestError(
@@ -548,6 +607,143 @@ export const getTestDetailsWithAnswers = async (req, res, next) => {
       questionsWithAnswers,
     });
   } catch (error) {
+    next(new BadRequestError(error.message));
+  }
+};
+
+// Update questions list on a Test (set by index, push question, or pull by index)
+export const updateTestQuestionList = async (req, res, next) => {
+  try {
+    const { id } = req.params; // test id
+    const { action, index, value } = req.body;
+
+    if (!action || !["set", "push", "pull"].includes(action)) {
+      throw new BadRequestError(
+        "Invalid or missing action. Use 'set', 'push' or 'pull'.",
+      );
+    }
+
+    const test = await Test.findById(id);
+    if (!test) throw new NotFoundError("Test not found.");
+
+    // Authorization: subjectTeacher or admin/proprietor
+    const userId = req.user?.userId || req.user?.id;
+    const userRole = req.user?.role;
+    if (!userId || !userRole)
+      throw new BadRequestError("User authentication required.");
+
+    const isOwner = test.subjectTeacher
+      ? test.subjectTeacher.toString() === userId.toString()
+      : false;
+    if (!(isOwner || userRole === "admin" || userRole === "proprietor")) {
+      throw new BadRequestError(
+        "You are not authorized to modify questions for this test.",
+      );
+    }
+
+    let updatedTest;
+
+    if (action === "set") {
+      if (typeof index !== "number" || index < 0) {
+        throw new BadRequestError(
+          "For 'set' action provide a valid non-negative numeric 'index'.",
+        );
+      }
+      if (!value)
+        throw new BadRequestError(
+          "For 'set' action provide a 'value' (question id).",
+        );
+
+      // validate question exists and matches test context
+      const q = await Question.findById(value);
+      if (!q) throw new NotFoundError("Provided question not found.");
+      if (
+        q.subject.toString() !== test.subject.toString() ||
+        q.classId.toString() !== test.classId.toString() ||
+        q.term.toString().toLowerCase() !== test.term.toString().toLowerCase()
+      ) {
+        throw new BadRequestError(
+          "Question does not match test subject, class or term.",
+        );
+      }
+
+      const update = { $set: {} };
+      update.$set[`questions.${index}`] = value;
+      updatedTest = await Test.findByIdAndUpdate(id, update, {
+        new: true,
+        runValidators: true,
+      }).populate([
+        {
+          path: "questions",
+          select: "_id questionType questionText options files",
+        },
+        { path: "classId", select: "_id className" },
+        { path: "subject", select: "_id subjectName" },
+        { path: "subjectTeacher", select: "_id firstName" },
+      ]);
+    } else if (action === "push") {
+      if (!value)
+        throw new BadRequestError(
+          "For 'push' action provide a 'value' (question id) to append.",
+        );
+
+      const q = await Question.findById(value);
+      if (!q) throw new NotFoundError("Provided question not found.");
+      if (
+        q.subject.toString() !== test.subject.toString() ||
+        q.classId.toString() !== test.classId.toString() ||
+        q.term.toString().toLowerCase() !== test.term.toString().toLowerCase()
+      ) {
+        throw new BadRequestError(
+          "Question does not match test subject, class or term.",
+        );
+      }
+
+      updatedTest = await Test.findByIdAndUpdate(
+        id,
+        { $push: { questions: value } },
+        { new: true, runValidators: true },
+      ).populate([
+        {
+          path: "questions",
+          select: "_id questionType questionText options files",
+        },
+        { path: "classId", select: "_id className" },
+        { path: "subject", select: "_id subjectName" },
+        { path: "subjectTeacher", select: "_id firstName" },
+      ]);
+    } else if (action === "pull") {
+      if (typeof index !== "number" || index < 0) {
+        throw new BadRequestError(
+          "For 'pull' action provide a valid non-negative numeric 'index'.",
+        );
+      }
+
+      const doc = await Test.findById(id);
+      if (!doc) throw new NotFoundError("Test not found.");
+      const arr = Array.isArray(doc.questions) ? doc.questions.slice() : [];
+      if (index >= arr.length)
+        throw new BadRequestError("Index out of range for questions array.");
+      arr.splice(index, 1);
+      doc.questions = arr;
+      updatedTest = await doc.save();
+      updatedTest = await Test.findById(updatedTest._id).populate([
+        {
+          path: "questions",
+          select: "_id questionType questionText options files",
+        },
+        { path: "classId", select: "_id className" },
+        { path: "subject", select: "_id subjectName" },
+        { path: "subjectTeacher", select: "_id firstName" },
+      ]);
+    }
+
+    res.status(StatusCodes.OK).json({
+      message: `Questions list ${action} operation successful.`,
+      test: updatedTest,
+    });
+  } catch (error) {
+    console.error("Error updating test questions:", error);
     next(new BadRequestError(error.message));
   }
 };

@@ -30,7 +30,9 @@ const assignmentSchema = new mongoose.Schema({
   subTopic: {
     type: String,
   },
-  questions: [{ type: mongoose.Schema.Types.ObjectId, ref: "Question" }],
+  questions: [
+    { type: mongoose.Schema.Types.ObjectId, ref: "Question", required: true },
+  ],
   marksObtainable: { type: Number, required: false },
   students: [{ type: mongoose.Schema.Types.ObjectId, ref: "Student" }], // List of students who received the assignment
   submitted: [

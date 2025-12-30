@@ -33,6 +33,20 @@ export const createQuestion = async (req, res, next) => {
       throw new BadRequestError("Please provide all required fields.");
     }
 
+    // Validate options for question types that require them
+    if (["multiple-choice", "rank-order"].includes(questionType)) {
+      if (!Array.isArray(options) || options.length < 2) {
+        throw new BadRequestError(
+          "Options must be an array with at least two choices for multiple-choice and rank-order questions.",
+        );
+      }
+    }
+
+    // Ensure correctAnswer is an array
+    const correctAnswerArray = Array.isArray(correctAnswer)
+      ? correctAnswer
+      : [correctAnswer];
+
     // Validate that lessonNote exists and retrieve related information
     const lessonNoteExists = await LessonNote.findById(lessonNote).populate([
       {
@@ -68,22 +82,24 @@ export const createQuestion = async (req, res, next) => {
       }
 
       // Validate that the subjectTeacher exists and is valid
-      const teacher = await Staff.findById(subjectTeacherId).populate([
-        {
-          path: "subjects",
-          select: "_id subjectName",
-        },
-      ]);
-      // const teacher = await Staff.findById(subjectTeacherId).populate(
-      //   "subjects",
-      // );
+      const teacher = await Staff.findById(subjectTeacherId).populate({
+        path: "teacherRecords.subjects",
+        select: "_id subjectName",
+      });
       if (!teacher) {
         throw new NotFoundError("Provided subjectTeacher not found.");
       }
 
-      const isAssignedSubject = teacher.subjects.some(
-        (subjectItem) => subjectItem.toString() === subject.toString(),
+      // Flatten all subjects from teacherRecords and normalize IDs for comparison
+      const teacherSubjects = (teacher.teacherRecords || []).flatMap((tr) =>
+        (tr.subjects || []).map((s) =>
+          s && s._id ? s._id.toString() : s.toString(),
+        ),
       );
+      const subjectId =
+        subject && subject._id ? subject._id.toString() : subject.toString();
+
+      const isAssignedSubject = teacherSubjects.includes(subjectId);
 
       if (!isAssignedSubject) {
         throw new BadRequestError(
@@ -92,20 +108,24 @@ export const createQuestion = async (req, res, next) => {
       }
     } else if (userRole === "teacher") {
       // Validate that the teacher is assigned the subject
-      // const teacher = await Staff.findById(userId).populate("subjects");
-      const teacher = await Staff.findById(userId).populate([
-        {
-          path: "subject",
-          select: "_id subjectName",
-        },
-      ]);
+      const teacher = await Staff.findById(userId).populate({
+        path: "teacherRecords.subjects",
+        select: "_id subjectName",
+      });
       if (!teacher) {
         throw new NotFoundError("Teacher not found.");
       }
 
-      isAuthorized = teacher.subjects.some(
-        (subjectItem) => subjectItem.toString() === subject.toString(),
+      const teacherSubjectsCurrent = (teacher.teacherRecords || []).flatMap(
+        (tr) =>
+          (tr.subjects || []).map((s) =>
+            s && s._id ? s._id.toString() : s.toString(),
+          ),
       );
+      const subjectIdCurrent =
+        subject && subject._id ? subject._id.toString() : subject.toString();
+
+      isAuthorized = teacherSubjectsCurrent.includes(subjectIdCurrent);
 
       if (!isAuthorized) {
         throw new BadRequestError(
@@ -122,7 +142,7 @@ export const createQuestion = async (req, res, next) => {
       questionText,
       questionType,
       options,
-      correctAnswer,
+      correctAnswer: correctAnswerArray,
       marks,
       subject,
       classId: lessonNoteExists.classId,
@@ -172,7 +192,8 @@ export const createQuestion = async (req, res, next) => {
       question,
     });
   } catch (error) {
-    next(new BadRequestError(error.message));
+    console.log("Error creating question:", error);
+    next(new InternalServerError(error.message));
   }
 };
 
@@ -275,6 +296,9 @@ export const getAllQuestions = async (req, res, next) => {
       topic,
       questionType,
       marks,
+      sort,
+      page,
+      limit,
     } = req.query;
 
     // Build an initial match stage for fields stored directly on Assignment
@@ -481,31 +505,31 @@ export const getQuestionById = async (req, res, next) => {
   try {
     const { id } = req.params;
 
-    const question = await Question.findById(id).populate([
-      {
+    const question = await Question.findById(id)
+      .populate({
         path: "classId",
         select: "_id className",
-      },
-      {
+      })
+      .populate({
         path: "subject",
         select: "_id subjectName",
-      },
-      {
+      })
+      .populate({
         path: "subjectTeacher",
         select: "_id firstName lastName",
-      },
-      {
+      })
+      .populate({
         path: "lessonNote",
         select: "_id lessonweek lessonPeriod",
-      },
-    ]);
+      });
     if (!question) {
       throw new NotFoundError("Question not found.");
     }
 
-    res.status(StatusCodes.OK).json({ question });
+    res.status(StatusCodes.OK).json({ ...question.toObject() });
   } catch (error) {
-    next(new BadRequestError(error.message));
+    console.log("Error fetching question by ID:", error);
+    next(new InternalServerError(error.message));
   }
 };
 
@@ -557,16 +581,23 @@ export const updateQuestion = async (req, res, next) => {
       // }
 
       // Validate that the subjectTeacher exists and is valid
-      const teacher = await Staff.findById(subjectTeacherId).populate(
-        "subjects",
-      );
+      const teacher = await Staff.findById(subjectTeacherId).populate({
+        path: "teacherRecords.subjects",
+        select: "_id subjectName",
+      });
       if (!teacher) {
         throw new NotFoundError("Provided subjectTeacher not found.");
       }
 
-      const isAssignedSubject = teacher.subjects.some(
-        (subjectItem) => subjectItem && subjectItem.equals(subject),
+      const teacherSubjects = (teacher.teacherRecords || []).flatMap((tr) =>
+        (tr.subjects || []).map((s) =>
+          s && s._id ? s._id.toString() : s.toString(),
+        ),
       );
+      const subjectId =
+        subject && subject._id ? subject._id.toString() : subject.toString();
+
+      const isAssignedSubject = teacherSubjects.includes(subjectId);
 
       if (!isAssignedSubject) {
         throw new BadRequestError(
@@ -575,15 +606,24 @@ export const updateQuestion = async (req, res, next) => {
       }
     } else if (userRole === "teacher") {
       // Validate that the teacher is assigned the subject
-      const teacher = await Staff.findById(userId).populate("subjects");
+      const teacher = await Staff.findById(userId).populate({
+        path: "teacherRecords.subjects",
+        select: "_id subjectName",
+      });
       if (!teacher) {
         throw new NotFoundError("Teacher not found.");
       }
 
-      isAuthorized = teacher.subjects.some(
-        (subjectItem) =>
-          subjectItem && subjectItem.toString() === subject.toString(),
+      const teacherSubjectsCurrent = (teacher.teacherRecords || []).flatMap(
+        (tr) =>
+          (tr.subjects || []).map((s) =>
+            s && s._id ? s._id.toString() : s.toString(),
+          ),
       );
+      const subjectIdCurrent =
+        subject && subject._id ? subject._id.toString() : subject.toString();
+
+      isAuthorized = teacherSubjectsCurrent.includes(subjectIdCurrent);
 
       if (!isAuthorized) {
         throw new BadRequestError(
@@ -592,6 +632,23 @@ export const updateQuestion = async (req, res, next) => {
       }
 
       subjectTeacherId = userId; // Assign the current teacher as the subjectTeacher
+    }
+
+    // Validate options for question types that require them (on update)
+    if (
+      questionType &&
+      ["multiple-choice", "rank-order"].includes(questionType)
+    ) {
+      if (!Array.isArray(req.body.options) || req.body.options.length < 2) {
+        throw new BadRequestError(
+          "Options must be an array with at least two choices for multiple-choice and rank-order questions.",
+        );
+      }
+    }
+
+    // Ensure correctAnswer is an array if provided
+    if (req.body.correctAnswer && !Array.isArray(req.body.correctAnswer)) {
+      req.body.correctAnswer = [req.body.correctAnswer];
     }
 
     // Prepare update data
@@ -640,7 +697,108 @@ export const updateQuestion = async (req, res, next) => {
       question: updatedQuestion,
     });
   } catch (error) {
-    next(new BadRequestError(error.message));
+    console.log("Error updating question:", error);
+    next(new InternalServerError(error.message));
+  }
+};
+
+// Update a single option entry (set by index, push new option, or pull by index)
+export const updateQuestionOption = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { action, index, value } = req.body;
+
+    if (!action || !["set", "push", "pull"].includes(action)) {
+      throw new BadRequestError(
+        "Invalid or missing action. Use 'set', 'push' or 'pull'.",
+      );
+    }
+
+    const question = await Question.findById(id);
+    if (!question) {
+      throw new NotFoundError("Question not found.");
+    }
+
+    // Authorization: only the subjectTeacher for the question or admin/proprietor can modify options
+    const userId = req.user?.userId || req.user?.id;
+    const userRole = req.user?.role;
+
+    if (!userId || !userRole) {
+      return next(new BadRequestError("User authentication required."));
+    }
+
+    const isOwner = question.subjectTeacher
+      ? question.subjectTeacher.toString() === userId.toString()
+      : false;
+
+    if (!(isOwner || userRole === "admin" || userRole === "proprietor")) {
+      return next(
+        new BadRequestError(
+          "You are not authorized to modify options for this question.",
+        ),
+      );
+    }
+
+    let updatedQuestion;
+
+    if (action === "set") {
+      if (typeof index !== "number" || index < 0) {
+        throw new BadRequestError(
+          "For 'set' action provide a valid non-negative numeric 'index'.",
+        );
+      }
+      if (typeof value === "undefined") {
+        throw new BadRequestError("For 'set' action provide a 'value'.");
+      }
+
+      const update = { $set: {} };
+      update.$set[`options.${index}`] = value;
+
+      updatedQuestion = await Question.findByIdAndUpdate(id, update, {
+        new: true,
+        runValidators: true,
+      });
+    } else if (action === "push") {
+      if (typeof value === "undefined") {
+        throw new BadRequestError(
+          "For 'push' action provide a 'value' to append.",
+        );
+      }
+
+      updatedQuestion = await Question.findByIdAndUpdate(
+        id,
+        { $push: { options: value } },
+        { new: true, runValidators: true },
+      );
+    } else if (action === "pull") {
+      // For pull we'll support removing by index. Provide 'index' (number).
+      if (typeof index !== "number" || index < 0) {
+        throw new BadRequestError(
+          "For 'pull' action provide a valid non-negative numeric 'index'.",
+        );
+      }
+
+      // Load the document, remove the index, then save to ensure validators run.
+      const doc = await Question.findById(id);
+      if (!doc) throw new NotFoundError("Question not found.");
+
+      const opts = Array.isArray(doc.options) ? doc.options.slice() : [];
+      if (index >= opts.length) {
+        throw new BadRequestError("Index out of range for options array.");
+      }
+
+      opts.splice(index, 1);
+      doc.options = opts;
+      updatedQuestion = await doc.save();
+    }
+
+    res.status(StatusCodes.OK).json({
+      message: `Option ${action} operation successful.`,
+      question: updatedQuestion,
+    });
+  } catch (error) {
+    console.log("Error updating question option:", error);
+    next(new InternalServerError(error.message));
   }
 };
 
@@ -756,6 +914,6 @@ export const deleteQuestion = async (req, res, next) => {
     });
   } catch (error) {
     console.error("Error deleting question or files:", error);
-    next(new BadRequestError(error.message));
+    next(new InternalServerError(error.message));
   }
 };

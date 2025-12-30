@@ -6,7 +6,7 @@ import {
   holidayDurationForEachTerm, // Ensure this is correctly defined
 } from "../utils/termGenerator.js"; // Import getCurrentTermDetails
 
-const { session, term, weekOfTerm } = getCurrentTermDetails(
+const { session, term } = getCurrentTermDetails(
   startTermGenerationDate,
   holidayDurationForEachTerm,
 ); // Pass the start date and holiday durations

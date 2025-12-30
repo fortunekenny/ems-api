@@ -22,7 +22,7 @@ export const getStudents = async (req, res, next) => {
     // Define allowed query parameters
     const allowedFilters = [
       "student", // combined filter for firstName, middleName, lastName, studentId
-      "classId",
+      "className",
       "status",
       "term",
       "session",
@@ -46,7 +46,7 @@ export const getStudents = async (req, res, next) => {
       );
     }
 
-    const { student, classId, status, term, session, sort, page, limit } =
+    const { student, className, status, term, session, sort, page, limit } =
       req.query;
 
     // Build an initial match stage for fields stored directly on Student
@@ -91,9 +91,9 @@ export const getStudents = async (req, res, next) => {
     // Build additional matching criteria based on joined fields.
     const joinMatch = {};
 
-    if (classId) {
+    if (className) {
       joinMatch["classData.className"] = {
-        $regex: `^${classId}$`,
+        $regex: `^${className}$`,
         $options: "i",
       };
     }

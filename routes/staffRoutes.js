@@ -75,6 +75,17 @@ router
     staffController.changeClassTeacher,
   );
 
+router.patch(
+  "/:staffId/addStudentToTeacherRecord",
+  [
+    authenticateToken,
+    checkStatus,
+    authorizeRole("admin", "proprietor"),
+    // checkPermissions,
+  ],
+  staffController.addStudentToTeacherRecord,
+);
+
 router
   .route("/rolloverTeacherRecords")
   .post(

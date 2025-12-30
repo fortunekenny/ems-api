@@ -9,18 +9,27 @@ import ClassWork from "../models/ClassWorkModel.js";
 import Exam from "../models/ExamModel.js";
 import Grade from "../models/GradeModel.js";
 import Question from "../models/QuestionsModel.js";
+import Student from "../models/StudentModel.js";
 import StudentAnswer from "../models/StudentAnswerModel.js";
 import Test from "../models/TestModel.js";
 import {
   calculateSemanticSimilarity,
   extractTextFromFile,
 } from "../utils/textExtractor.js";
+import {
+  getCurrentTermDetails,
+  startTermGenerationDate,
+  holidayDurationForEachTerm,
+} from "../utils/termGenerator.js";
 // import * as tf from "@tensorflow/tfjs";
 // import use from "@tensorflow-models/universal-sentence-encoder";
 
 // Create a new student answer
 
 export const createStudentAnswer = async (req, res, next) => {
+  // This operation is performed inside a MongoDB transaction so that
+  // no partial writes occur if any error happens.
+  const mongoSession = await mongoose.startSession();
   try {
     const { id: userId, role: userRole } = req.user;
     const { student, answers, evaluationTypeId } = req.body;
@@ -31,6 +40,12 @@ export const createStudentAnswer = async (req, res, next) => {
       );
     }
 
+    // Auto-populate term and session from getCurrentTermDetails
+    const { term, session } = getCurrentTermDetails(
+      startTermGenerationDate,
+      holidayDurationForEachTerm,
+    );
+
     let studentId = userId;
     if (["admin", "proprietor"].includes(userRole)) {
       if (!student)
@@ -40,259 +55,262 @@ export const createStudentAnswer = async (req, res, next) => {
       studentId = mongoose.Types.ObjectId.createFromHexString(userId);
     }
 
-    const evaluationModelMap = { Test, Assignment, ClassWork, Exam };
-    let evaluation = null;
+    // Run all DB reads/writes inside a transaction to ensure atomicity
+    let createdStudentAnswerId = null;
+    await mongoSession.withTransaction(async () => {
+      const evaluationModelMap = { Test, Assignment, ClassWork, Exam };
+      let evaluation = null;
 
-    for (const [key, Model] of Object.entries(evaluationModelMap)) {
-      evaluation = await Model.findById(evaluationTypeId).populate("questions");
-      if (evaluation) break;
-    }
+      // Find evaluation (use session on queries)
+      for (const [key, Model] of Object.entries(evaluationModelMap)) {
+        evaluation = await Model.findById(evaluationTypeId)
+          .populate("questions")
+          .session(mongoSession);
+        if (evaluation) break;
+      }
 
-    if (!evaluation) throw new NotFoundError(`Evaluation not found.`);
+      if (!evaluation) throw new NotFoundError(`Evaluation not found.`);
 
-    const {
-      subject,
-      classId,
-      evaluationType,
-      students,
-      questions,
-      marksObtainable,
-    } = evaluation;
-
-    if (!students.some((s) => s.equals(studentId))) {
-      throw new BadRequestError(
-        `Student is not in the ${evaluationType} list.`,
-      );
-    }
-
-    if (
-      evaluation.submitted.some((submission) =>
-        submission.student.equals(studentId),
-      )
-    ) {
-      throw new BadRequestError(
-        `You have already submitted this ${evaluationType}.`,
-      );
-    }
-
-    const questionData = await Question.find({
-      _id: { $in: answers.map((answer) => answer.questionId) },
-    });
-
-    if (questionData.length !== answers.length) {
-      throw new BadRequestError("Some questions could not be found.");
-    }
-
-    const evaluationTotalScore = questions.reduce(
-      (sum, question) => sum + question.marks,
-      0,
-    );
-
-    const processedAnswers = await Promise.all(
-      answers.map(async (answer) => {
-        const question = questionData.find((q) =>
-          q._id.equals(answer.questionId),
+      // Verify evaluation is for the current term and session
+      if (evaluation.term !== term || evaluation.session !== session) {
+        throw new BadRequestError(
+          `Evaluation is not for the current term (${term}) and session (${session}).`,
         );
-        if (!question)
-          throw new BadRequestError("Some questions could not be found.");
+      }
 
-        const { questionType, correctAnswer, marks } = question;
-        const correctAnswers = Array.isArray(correctAnswer)
-          ? correctAnswer
-          : [correctAnswer];
+      const {
+        subject,
+        classId,
+        evaluationType,
+        students,
+        questions,
+        marksObtainable,
+      } = evaluation;
 
-        let isCorrect = false;
-        let highestSimilarity = 0;
+      if (!students.some((s) => s.equals(studentId))) {
+        throw new BadRequestError(
+          `Student is not in the ${evaluationType} list.`,
+        );
+      }
 
-        // Handle file uploads
-        let updatedFiles = answer.files || [];
-        if (req.files && req.files.length > 0) {
-          updatedFiles = req.files.map((file) => {
-            const { path: fileUrl, mimetype, size } = file;
+      if (
+        evaluation.submitted.some((submission) =>
+          submission.student.equals(studentId),
+        )
+      ) {
+        throw new BadRequestError(
+          `You have already submitted this ${evaluationType}.`,
+        );
+      }
 
-            const allowedTypes = [
-              "application/pdf",
-              "application/msword",
-              "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            ];
+      // Fetch questions using the transaction session
+      const questionData = await Question.find({
+        _id: { $in: answers.map((answer) => answer.questionId) },
+      }).session(mongoSession);
 
-            if (!allowedTypes.includes(mimetype)) {
-              throw new BadRequestError(
-                `Invalid file type: ${mimetype}. Allowed types are PDF, Word, and Excel files.`,
-              );
-            }
+      if (questionData.length !== answers.length) {
+        throw new BadRequestError("Some questions could not be found.");
+      }
 
-            if (size > 3 * 1024 * 1024) {
-              throw new BadRequestError("File size must not exceed 3MB.");
-            }
+      const evaluationTotalScore = questions.reduce(
+        (sum, question) => sum + question.marks,
+        0,
+      );
 
-            return { url: fileUrl };
-          });
-        }
-
-        // Ensure files for file-upload questions
-        if (questionType === "file-upload" && updatedFiles.length === 0) {
-          throw new BadRequestError(
-            `Files are required for question ${question._id}.`,
+      // Process answers (these operations may call external utilities but do not mutate DB)
+      const processedAnswers = await Promise.all(
+        answers.map(async (answer) => {
+          const question = questionData.find((q) =>
+            q._id.equals(answer.questionId),
           );
-        }
+          if (!question)
+            throw new BadRequestError("Some questions could not be found.");
 
-        // Handle 'file-upload' question type
-        if (questionType === "file-upload") {
-          // Extract text from the uploaded file
-          const fileText = await extractTextFromFile(updatedFiles[0].url);
+          const { questionType, correctAnswer, marks } = question;
+          const correctAnswers = Array.isArray(correctAnswer)
+            ? correctAnswer
+            : [correctAnswer];
 
-          for (let correctAns of correctAnswers) {
-            const similarity = await calculateSemanticSimilarity(
-              fileText,
-              correctAns,
-            );
+          let isCorrect = false;
+          let highestSimilarity = 0;
 
-            if (similarity >= 0.4) {
-              isCorrect = true; // Mark as correct if similarity is above threshold
-            }
-
-            // Track the highest similarity for marks calculation
-            if (!isNaN(similarity)) {
-              highestSimilarity = Math.max(highestSimilarity, similarity);
-            }
+          // Handle file uploads
+          let updatedFiles = answer.files || [];
+          if (req.files && req.files.length > 0) {
+            updatedFiles = req.files.map((file) => {
+              const { path: fileUrl, mimetype, size } = file;
+              const allowedTypes = [
+                "application/pdf",
+                "application/msword",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+              ];
+              if (!allowedTypes.includes(mimetype)) {
+                throw new BadRequestError(
+                  `Invalid file type: ${mimetype}. Allowed types are PDF, Word, and Excel files.`,
+                );
+              }
+              if (size > 3 * 1024 * 1024) {
+                throw new BadRequestError("File size must not exceed 3MB.");
+              }
+              return { url: fileUrl };
+            });
           }
 
-          // Calculate marks based on highest similarity
-          const marksAwarded = Math.max(
-            0,
-            Math.round((highestSimilarity || 0) * marks),
-          );
+          // Ensure files for file-upload questions
+          if (questionType === "file-upload" && updatedFiles.length === 0) {
+            throw new BadRequestError(
+              `Files are required for question ${question._id}.`,
+            );
+          }
 
-          return {
-            questionId: answer.questionId,
-            answer: fileText, // Extracted text from the uploaded file
-            files: updatedFiles,
-            isCorrect,
-            marksAwarded,
-          };
-        } else {
-          // Handle other question types (e.g., short-answer, essay, multiple-choice)
-          const studentAnswers = Array.isArray(answer.answer)
-            ? answer.answer
-            : [answer.answer];
-
-          for (let correctAns of correctAnswers) {
-            for (let studentAns of studentAnswers) {
-              const isExactMatch =
-                studentAns.trim().toLowerCase() ===
-                correctAns.trim().toLowerCase();
-              if (isExactMatch) {
-                isCorrect = true;
-                highestSimilarity = 1; // Exact match, highest possible similarity
-                break; // No need to check further if there's an exact match
-              }
-
+          if (questionType === "file-upload") {
+            const fileText = await extractTextFromFile(updatedFiles[0].url);
+            for (let correctAns of correctAnswers) {
               const similarity = await calculateSemanticSimilarity(
-                studentAns,
+                fileText,
                 correctAns,
               );
-
-              if (similarity >= 0.4) {
-                isCorrect = true; // Mark as correct if similarity is above threshold
-              }
-
-              // Track the highest similarity for marks calculation
-              if (!isNaN(similarity)) {
+              if (similarity >= 0.4) isCorrect = true;
+              if (!isNaN(similarity))
                 highestSimilarity = Math.max(highestSimilarity, similarity);
+            }
+            const marksAwarded = Math.max(
+              0,
+              Math.round((highestSimilarity || 0) * marks),
+            );
+            return {
+              questionId: answer.questionId,
+              answer: fileText,
+              files: updatedFiles,
+              isCorrect,
+              marksAwarded,
+            };
+          } else {
+            const studentAnswers = Array.isArray(answer.answer)
+              ? answer.answer
+              : [answer.answer];
+            for (let correctAns of correctAnswers) {
+              for (let studentAns of studentAnswers) {
+                if (studentAns == null || correctAns == null) continue;
+                const studentAnsStr =
+                  typeof studentAns === "string"
+                    ? studentAns
+                    : String(studentAns);
+                const correctAnsStr =
+                  typeof correctAns === "string"
+                    ? correctAns
+                    : String(correctAns);
+                const isExactMatch =
+                  studentAnsStr.trim().toLowerCase() ===
+                  correctAnsStr.trim().toLowerCase();
+                if (isExactMatch) {
+                  isCorrect = true;
+                  highestSimilarity = 1;
+                  break;
+                }
+                const similarity = await calculateSemanticSimilarity(
+                  studentAnsStr,
+                  correctAnsStr,
+                );
+                if (similarity >= 0.4) isCorrect = true;
+                if (!isNaN(similarity))
+                  highestSimilarity = Math.max(highestSimilarity, similarity);
               }
             }
+            const marksAwarded = Math.max(
+              0,
+              Math.round((highestSimilarity || 0) * marks),
+            );
+            return {
+              questionId: answer.questionId,
+              answer: studentAnswers,
+              files: updatedFiles,
+              isCorrect,
+              marksAwarded,
+            };
           }
-
-          // Calculate marks based on highest similarity
-          const marksAwarded = Math.max(
-            0,
-            Math.round((highestSimilarity || 0) * marks),
-          );
-
-          return {
-            questionId: answer.questionId,
-            answer: studentAnswers, // Always use student's answers as an array
-            files: updatedFiles,
-            isCorrect,
-            marksAwarded,
-          };
-        }
-      }),
-    );
-
-    evaluation.submitted.push({ student: studentId });
-    await evaluation.save();
-
-    const markObtained = processedAnswers.reduce(
-      (sum, answer) => sum + answer.marksAwarded,
-      0,
-    );
-
-    const total = marksObtainable ? marksObtainable : evaluationTotalScore;
-
-    const grade = (() => {
-      if (evaluationType === "Test" || evaluationType === "Exam") {
-        const percentage = (markObtained / total) * 100;
-
-        if (percentage < 30) return "F";
-        if (percentage < 40) return "E";
-        if (percentage < 50) return "D";
-        if (percentage < 60) return "C";
-        if (percentage < 70) return "B";
-        return "A";
-      }
-      return null;
-    })();
-
-    const studentAnswer = new StudentAnswer({
-      student: studentId,
-      subject,
-      evaluationType,
-      evaluationTypeId,
-      answers: processedAnswers,
-      markObtained,
-      grade,
-      classId,
-    });
-    await studentAnswer.save();
-
-    // Update student's academicRecords for the correct term/session/class
-    const studentDoc = await Student.findById(studentId);
-    if (studentDoc) {
-      // Find the correct academic record
-      const recordIndex = studentDoc.academicRecords.findIndex(
-        (rec) =>
-          rec.term === evaluation.term &&
-          rec.session === evaluation.session &&
-          rec.classId?.toString() === classId.toString()
+        }),
       );
-      if (recordIndex !== -1) {
-        if (evaluationType === "Assignment") {
-          studentDoc.academicRecords[recordIndex].assignments = [
-            ...(studentDoc.academicRecords[recordIndex].assignments || []),
-            studentAnswer._id,
-          ];
-        } else if (evaluationType === "ClassWork") {
-          studentDoc.academicRecords[recordIndex].classworks = [
-            ...(studentDoc.academicRecords[recordIndex].classworks || []),
-            studentAnswer._id,
-          ];
-        } else if (evaluationType === "Test") {
-          studentDoc.academicRecords[recordIndex].tests = [
-            ...(studentDoc.academicRecords[recordIndex].tests || []),
-            studentAnswer._id,
-          ];
-        } else if (evaluationType === "Exam") {
-          studentDoc.academicRecords[recordIndex].exam = studentAnswer._id;
-        }
-        await studentDoc.save();
-      }
-    }
 
+      // Calculate totals and grade
+      const markObtained = processedAnswers.reduce(
+        (sum, answer) => sum + answer.marksAwarded,
+        0,
+      );
+      const total = marksObtainable ? marksObtainable : evaluationTotalScore;
+      const grade = (() => {
+        if (evaluationType === "Test" || evaluationType === "Exam") {
+          const percentage = (markObtained / total) * 100;
+          if (percentage < 30) return "F";
+          if (percentage < 40) return "E";
+          if (percentage < 50) return "D";
+          if (percentage < 60) return "C";
+          if (percentage < 70) return "B";
+          return "A";
+        }
+        return null;
+      })();
+
+      // Create and save StudentAnswer within transaction
+      const studentAnswer = new StudentAnswer({
+        student: studentId,
+        subject: subject,
+        evaluationType: evaluationType,
+        evaluationTypeId: evaluationTypeId,
+        answers: processedAnswers,
+        markObtained,
+        grade,
+        classId,
+        term,
+        session,
+      });
+      await studentAnswer.save({ session: mongoSession });
+      createdStudentAnswerId = studentAnswer._id;
+
+      // Mark evaluation as submitted and save (within transaction)
+      evaluation.submitted.push({ student: studentId });
+      await evaluation.save({ session: mongoSession });
+
+      // Update student's academicRecords for the correct term/session/class
+      const studentDoc = await Student.findById(studentId).session(
+        mongoSession,
+      );
+      if (studentDoc) {
+        const recordIndex = studentDoc.academicRecords.findIndex(
+          (rec) =>
+            rec.term === evaluation.term &&
+            rec.session === evaluation.session &&
+            rec.classId?.toString() === classId.toString(),
+        );
+        if (recordIndex !== -1) {
+          if (evaluationType === "Assignment") {
+            studentDoc.academicRecords[recordIndex].assignments = [
+              ...(studentDoc.academicRecords[recordIndex].assignments || []),
+              createdStudentAnswerId,
+            ];
+          } else if (evaluationType === "ClassWork") {
+            studentDoc.academicRecords[recordIndex].classworks = [
+              ...(studentDoc.academicRecords[recordIndex].classworks || []),
+              createdStudentAnswerId,
+            ];
+          } else if (evaluationType === "Test") {
+            studentDoc.academicRecords[recordIndex].tests = [
+              ...(studentDoc.academicRecords[recordIndex].tests || []),
+              createdStudentAnswerId,
+            ];
+          } else if (evaluationType === "Exam") {
+            studentDoc.academicRecords[recordIndex].exam =
+              createdStudentAnswerId;
+          }
+          await studentDoc.save({ session: mongoSession });
+        }
+      }
+    });
+
+    // After successful transaction, retrieve populated result and respond
     const populatedStudentAnswer = await StudentAnswer.findById(
-      studentAnswer._id,
+      createdStudentAnswerId,
     ).populate([
       { path: "answers.questionId", select: "_id questionText files" },
       { path: "classId", select: "_id className" },
@@ -306,7 +324,10 @@ export const createStudentAnswer = async (req, res, next) => {
     });
   } catch (error) {
     console.log("Error submitting student answer:", error);
+    // Ensure any transaction is aborted and session ended
     next(new BadRequestError(error.message));
+  } finally {
+    mongoSession.endSession();
   }
 };
 
@@ -565,14 +586,20 @@ export const getStudentAnswersById = async (req, res, next) => {
   try {
     const { id } = req.params;
 
-    const answer = await StudentAnswer.findById(id);
+    const answer = await StudentAnswer.findById(id).populate([
+      /* { path: "answers.questionId", select: "_id questionText files" }, */
+      { path: "classId", select: "_id className" },
+      { path: "subject", select: "_id subjectName" },
+      { path: "student", select: "_id firstName middleName lastName" },
+    ]);
     if (!answer) {
       throw new NotFoundError("No answers found");
     }
 
-    res.status(StatusCodes.OK).json(answer);
+    res.status(StatusCodes.OK).json({ ...answer.toObject() });
   } catch (error) {
-    next(new BadRequestError(error.message));
+    console.error("Error getting student answer by ID:", error);
+    next(new InternalServerError(error.message));
   }
 };
 
@@ -761,17 +788,30 @@ export const updateStudentAnswer = async (req, res, next) => {
               : [answer.answer];
             for (let correctAns of correctAnswers) {
               for (let studentAns of studentAnswers) {
+                // Coerce answers to strings so numeric answers (e.g. 21) match correctly
+                if (studentAns == null || correctAns == null) {
+                  continue;
+                }
+                const studentAnsStr =
+                  typeof studentAns === "string"
+                    ? studentAns
+                    : String(studentAns);
+                const correctAnsStr =
+                  typeof correctAns === "string"
+                    ? correctAns
+                    : String(correctAns);
+
                 const isExactMatch =
-                  studentAns.trim().toLowerCase() ===
-                  correctAns.trim().toLowerCase();
+                  studentAnsStr.trim().toLowerCase() ===
+                  correctAnsStr.trim().toLowerCase();
                 if (isExactMatch) {
                   isCorrect = true;
                   highestSimilarity = 1;
                   break;
                 }
                 const similarity = await calculateSemanticSimilarity(
-                  studentAns,
-                  correctAns,
+                  studentAnsStr,
+                  correctAnsStr,
                 );
                 if (similarity >= 0.4) {
                   isCorrect = true;
@@ -866,7 +906,15 @@ export const deleteStudentAnswer = async (req, res, next) => {
       throw new NotFoundError("Student answer not found.");
     }
 
-    const { evaluationTypeId, student, evaluationType } = studentAnswer; // Extract evaluationTypeId and student from the document
+    const {
+      evaluationTypeId,
+      student,
+      evaluationType,
+      subject,
+      classId,
+      term,
+      session,
+    } = studentAnswer;
 
     // Determine evaluation model dynamically
     const evaluationModelMap = {
@@ -887,37 +935,38 @@ export const deleteStudentAnswer = async (req, res, next) => {
     }
 
     // Remove the studentAnswer ID from the submitted list
-
     evaluation.submitted = evaluation.submitted.filter(
       (submission) => submission.student.toString() !== student.toString(),
     );
     await evaluation.save();
 
-    // let gradeData;
+    // Clean up Grade data if this is an Exam or Test
+    if (evaluationType === "Exam" || evaluationType === "Test") {
+      const gradeData = await Grade.findOne({
+        student: student,
+        subject: subject,
+        classId: classId,
+        term: term,
+        session: session,
+      });
 
-    // if (evaluationType === "Exam" || evaluationType === "Test") {
-    //   gradeData = await Grade.find({ _id: id });
-    // }
-    const gradeData = await Grade.find({ _id: id });
-
-    if (gradeData.length >= 1) {
-      // throw new NotFoundError("Grade not found.");
-
-      for (const grade of gradeData) {
+      if (gradeData) {
         if (evaluationType === "Exam") {
-          grade.exam = null;
-          grade.examScore = 0;
-        } else if (evaluationType == "Test") {
-          grade.tests = filter(
-            grade.tests,
-            (test) => test.toString() !== id.toString(),
+          gradeData.exam = null;
+          gradeData.examScore = 0;
+        } else if (evaluationType === "Test") {
+          // Remove this test from the tests array
+          gradeData.tests = gradeData.tests.filter(
+            (testId) => testId.toString() !== evaluationTypeId.toString(),
           );
-          grade.testsScore = grade.tests.reduce(
-            (sum, test) => sum + test.score,
+          // Recalculate testsScore
+          gradeData.testsScore = gradeData.tests.reduce(
+            (sum, testId) =>
+              sum + (gradeData.testsScore?.[testId.toString()] || 0),
             0,
           );
         }
-        await grade.save();
+        await gradeData.save();
       }
     }
 

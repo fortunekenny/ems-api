@@ -15,7 +15,8 @@ import Subject from "../models/SubjectModel.js";
 export const createClassWork = async (req, res, next) => {
   try {
     const { lessonNote, questions, marksObtainable } = req.body;
-    const { id: userId, role: userRole } = req.user;
+    const userId = req.user?.userId || req.user?.id;
+    const userRole = req.user?.role;
 
     // Validate required fields
     if (!questions || !Array.isArray(questions) || questions.length === 0) {
@@ -26,9 +27,9 @@ export const createClassWork = async (req, res, next) => {
     if (!lessonNote) {
       throw new BadRequestError("Lesson note must be provided.");
     }
-    // if (!marksObtainable) {
-    //   throw new BadRequestError("MarksObtainable must be provided.");
-    // }
+    /* if (!marksObtainable) {
+       throw new BadRequestError("MarksObtainable must be provided.");
+     } */
 
     // Fetch and validate the lesson note
     const note = await LessonNote.findById(lessonNote).populate(
@@ -66,16 +67,24 @@ export const createClassWork = async (req, res, next) => {
       }
 
       // Validate that the subjectTeacher exists and is valid
-      const teacher = await Staff.findById(subjectTeacherId).populate(
-        "subjects",
-      );
+      const teacher = await Staff.findById(subjectTeacherId).populate({
+        path: "teacherRecords.subjects",
+        select: "_id subjectName",
+      });
       if (!teacher) {
         throw new NotFoundError("Provided subjectTeacher not found.");
       }
 
-      const isAssignedSubject = teacher.subjects.some(
-        (subjectItem) => subjectItem.toString() === subject.toString(),
+      // Flatten subjects from teacherRecords and normalize IDs
+      const teacherSubjects = (teacher.teacherRecords || []).flatMap((tr) =>
+        (tr.subjects || []).map((s) =>
+          s && s._id ? s._id.toString() : s.toString(),
+        ),
       );
+      const subjectId =
+        subject && subject._id ? subject._id.toString() : subject.toString();
+
+      const isAssignedSubject = teacherSubjects.includes(subjectId);
 
       if (!isAssignedSubject) {
         throw new BadRequestError(
@@ -83,14 +92,24 @@ export const createClassWork = async (req, res, next) => {
         );
       }
     } else if (userRole === "teacher") {
-      const teacher = await Staff.findById(userId).populate("subjects");
+      const teacher = await Staff.findById(userId).populate({
+        path: "teacherRecords.subjects",
+        select: "_id subjectName",
+      });
       if (!teacher) {
         throw new BadRequestError("Teacher not found.");
       }
 
-      isAuthorized = teacher.subjects.some(
-        (subjectItem) => subjectItem.toString() === subject.toString(),
+      const teacherSubjectsCurrent = (teacher.teacherRecords || []).flatMap(
+        (tr) =>
+          (tr.subjects || []).map((s) =>
+            s && s._id ? s._id.toString() : s.toString(),
+          ),
       );
+      const subjectIdCurrent =
+        subject && subject._id ? subject._id.toString() : subject.toString();
+
+      isAuthorized = teacherSubjectsCurrent.includes(subjectIdCurrent);
 
       if (!isAuthorized) {
         throw new BadRequestError(
@@ -114,6 +133,7 @@ export const createClassWork = async (req, res, next) => {
     }
 
     // Validate questions against the lesson note context
+    let totalMarks = 0;
     for (const [index, question] of questionDocs.entries()) {
       // console.log(`Validating question ${index + 1}: `, question);
       if (
@@ -127,7 +147,12 @@ export const createClassWork = async (req, res, next) => {
           } does not match either the class or subject or term.`,
         );
       }
+      // Sum up the marks from each question
+      totalMarks += question.marks || 0;
     }
+
+    // Set marksObtainable to the sum of all question marks
+    req.body.marksObtainable = totalMarks;
 
     // Fetch students for the classId
     const classData = await Class.findById(req.body.classId).populate(
@@ -172,7 +197,8 @@ export const createClassWork = async (req, res, next) => {
       populatedClassWork,
     });
   } catch (error) {
-    next(new BadRequestError(error.message));
+    console.error("Error creating class work:", error);
+    next(new InternalServerError(error.message));
   }
 };
 
@@ -386,33 +412,36 @@ export const getClassWorkById = async (req, res, next) => {
   try {
     const { id } = req.params;
 
-    const classWork = await ClassWork.findById(id).populate([
-      { path: "questions", select: "_id questionType questionText options" },
-      {
+    const classWork = await ClassWork.findById(id)
+      .populate({
+        path: "questions",
+        select: "_id questionType questionText options",
+      })
+      .populate({
         path: "classId",
         select: "_id className",
-      },
-      {
+      })
+      .populate({
         path: "subject",
         select: "_id subjectName",
-      },
-      {
+      })
+      .populate({
         path: "subjectTeacher",
         select: "_id name",
-      },
-      {
+      })
+      .populate({
         path: "lessonNote",
         select: "_id lessonweek lessonPeriod",
-      },
-    ]);
+      });
 
     if (!classWork) {
       throw new NotFoundError("ClassWork not found.");
     }
 
-    res.status(StatusCodes.OK).json(classWork);
+    res.status(StatusCodes.OK).json({ ...classWork.toObject() });
   } catch (error) {
-    next(new BadRequestError(error.message));
+    console.error("Error getting class work by ID:", error);
+    next(new InternalServerError(error.message));
   }
 };
 
@@ -444,16 +473,23 @@ export const updateClassWork = async (req, res, next) => {
         );
       }
 
-      const teacher = await Staff.findById(subjectTeacherId).populate([
-        { path: "subjects", select: "_id subjectName" },
-      ]);
+      const teacher = await Staff.findById(subjectTeacherId).populate({
+        path: "teacherRecords.subjects",
+        select: "_id subjectName",
+      });
       if (!teacher) {
         throw new NotFoundError("Provided subjectTeacher not found.");
       }
 
-      const isAssignedSubject = teacher.subjects.some(
-        (subjectItem) => subjectItem && subjectItem.equals(subject),
+      const teacherSubjects = (teacher.teacherRecords || []).flatMap((tr) =>
+        (tr.subjects || []).map((s) =>
+          s && s._id ? s._id.toString() : s.toString(),
+        ),
       );
+      const subjectId =
+        subject && subject._id ? subject._id.toString() : subject.toString();
+
+      const isAssignedSubject = teacherSubjects.includes(subjectId);
 
       if (!isAssignedSubject) {
         throw new BadRequestError(
@@ -461,15 +497,25 @@ export const updateClassWork = async (req, res, next) => {
         );
       }
     } else if (userRole === "teacher") {
-      const teacher = await Staff.findById(userId).populate("subjects");
+      const teacher = await Staff.findById(userId).populate({
+        path: "teacherRecords.subjects",
+        select: "_id subjectName",
+      });
       if (!teacher) {
         throw new NotFoundError("Teacher not found.");
       }
 
-      // Check if the teacher is authorized for this test's subject
-      isAuthorized = teacher.subjects.some(
-        (subjectItem) => subjectItem.toString() === subject.toString(),
+      const teacherSubjectsCurrent = (teacher.teacherRecords || []).flatMap(
+        (tr) =>
+          (tr.subjects || []).map((s) =>
+            s && s._id ? s._id.toString() : s.toString(),
+          ),
       );
+      const subjectIdCurrent =
+        subject && subject._id ? subject._id.toString() : subject.toString();
+
+      // Check if the teacher is authorized for this test's subject
+      isAuthorized = teacherSubjectsCurrent.includes(subjectIdCurrent);
 
       if (!isAuthorized) {
         throw new BadRequestError(
@@ -572,6 +618,150 @@ export const updateClassWork = async (req, res, next) => {
   }
 };
 
+// Update questions list on a ClassWork (set by index, push question, or pull by index)
+export const updateClassWorkQuestionList = async (req, res, next) => {
+  try {
+    const { id } = req.params; // classWork id
+    const { action, index, value } = req.body;
+
+    if (!action || !["set", "push", "pull"].includes(action)) {
+      throw new BadRequestError(
+        "Invalid or missing action. Use 'set', 'push' or 'pull'.",
+      );
+    }
+
+    const classWork = await ClassWork.findById(id);
+    if (!classWork) throw new NotFoundError("ClassWork not found.");
+
+    // Authorization: subjectTeacher or admin/proprietor
+    const userId = req.user?.userId || req.user?.id;
+    const userRole = req.user?.role;
+    if (!userId || !userRole)
+      throw new BadRequestError("User authentication required.");
+
+    const isOwner = classWork.subjectTeacher
+      ? classWork.subjectTeacher.toString() === userId.toString()
+      : false;
+    if (!(isOwner || userRole === "admin" || userRole === "proprietor")) {
+      throw new BadRequestError(
+        "You are not authorized to modify questions for this class work.",
+      );
+    }
+
+    let updatedClassWork;
+
+    if (action === "set") {
+      if (typeof index !== "number" || index < 0) {
+        throw new BadRequestError(
+          "For 'set' action provide a valid non-negative numeric 'index'.",
+        );
+      }
+      if (!value)
+        throw new BadRequestError(
+          "For 'set' action provide a 'value' (question id).",
+        );
+
+      // validate question exists and matches classWork context
+      const q = await Question.findById(value);
+      if (!q) throw new NotFoundError("Provided question not found.");
+      if (
+        q.subject.toString() !== classWork.subject.toString() ||
+        q.classId.toString() !== classWork.classId.toString() ||
+        q.term.toString().toLowerCase() !==
+          classWork.term.toString().toLowerCase()
+      ) {
+        throw new BadRequestError(
+          "Question does not match class/work subject, class or term.",
+        );
+      }
+
+      const update = { $set: {} };
+      update.$set[`questions.${index}`] = value;
+      updatedClassWork = await ClassWork.findByIdAndUpdate(id, update, {
+        new: true,
+        runValidators: true,
+      }).populate([
+        {
+          path: "questions",
+          select: "_id questionType questionText options files",
+        },
+        { path: "classId", select: "_id className" },
+        { path: "subject", select: "_id subjectName" },
+        { path: "subjectTeacher", select: "_id firstName" },
+        { path: "lessonNote", select: "_id lessonweek lessonPeriod" },
+      ]);
+    } else if (action === "push") {
+      if (!value)
+        throw new BadRequestError(
+          "For 'push' action provide a 'value' (question id) to append.",
+        );
+
+      const q = await Question.findById(value);
+      if (!q) throw new NotFoundError("Provided question not found.");
+      if (
+        q.subject.toString() !== classWork.subject.toString() ||
+        q.classId.toString() !== classWork.classId.toString() ||
+        q.term.toString().toLowerCase() !==
+          classWork.term.toString().toLowerCase()
+      ) {
+        throw new BadRequestError(
+          "Question does not match class/work subject, class or term.",
+        );
+      }
+
+      updatedClassWork = await ClassWork.findByIdAndUpdate(
+        id,
+        { $push: { questions: value } },
+        { new: true, runValidators: true },
+      ).populate([
+        {
+          path: "questions",
+          select: "_id questionType questionText options files",
+        },
+        { path: "classId", select: "_id className" },
+        { path: "subject", select: "_id subjectName" },
+        { path: "subjectTeacher", select: "_id firstName" },
+        { path: "lessonNote", select: "_id lessonweek lessonPeriod" },
+      ]);
+    } else if (action === "pull") {
+      if (typeof index !== "number" || index < 0) {
+        throw new BadRequestError(
+          "For 'pull' action provide a valid non-negative numeric 'index'.",
+        );
+      }
+
+      const doc = await ClassWork.findById(id);
+      if (!doc) throw new NotFoundError("ClassWork not found.");
+      const arr = Array.isArray(doc.questions) ? doc.questions.slice() : [];
+      if (index >= arr.length)
+        throw new BadRequestError("Index out of range for questions array.");
+      arr.splice(index, 1);
+      doc.questions = arr;
+      updatedClassWork = await doc.save();
+      updatedClassWork = await ClassWork.findById(
+        updatedClassWork._id,
+      ).populate([
+        {
+          path: "questions",
+          select: "_id questionType questionText options files",
+        },
+        { path: "classId", select: "_id className" },
+        { path: "subject", select: "_id subjectName" },
+        { path: "subjectTeacher", select: "_id firstName" },
+        { path: "lessonNote", select: "_id lessonweek lessonPeriod" },
+      ]);
+    }
+
+    res.status(StatusCodes.OK).json({
+      message: `Questions list ${action} operation successful.`,
+      classWork: updatedClassWork,
+    });
+  } catch (error) {
+    console.error("Error updating classWork questions:", error);
+    next(new BadRequestError(error.message));
+  }
+};
+
 export const submitClassWork = async (req, res, next) => {
   try {
     const { id } = req.params; // ClassWork ID
@@ -634,11 +824,12 @@ export const deleteClassWork = async (req, res, next) => {
     }
 
     // Remove the classWork reference from the LessonNote
-    lessonNoteDoc.classWork = lessonNoteDoc.classWork.filter(
-      (assignId) => !assignId.equals(id), // Filter out the current classWork ID
-    );
-    await lessonNoteDoc.save();
+    if (lessonNoteDoc.evaluation && lessonNoteDoc.evaluation.equals(id)) {
+      lessonNoteDoc.evaluation = null;
+      await lessonNoteDoc.save();
+    }
 
+    const userId = req.user?.userId || req.user?.id;
     const staffsData = await Staff.find({
       $or: [{ role: { $in: ["admin", "proprietor"] }, status: "active" }],
     });
@@ -659,7 +850,7 @@ export const deleteClassWork = async (req, res, next) => {
       }),
     ];
 
-    await sendBulkNotifications({
+    /*     await sendBulkNotifications({
       sender: req.user.userId,
       title: "Class Work Deleted",
       message: notificationMessage,
@@ -667,7 +858,7 @@ export const deleteClassWork = async (req, res, next) => {
       metadata: {
         broadcastId: new mongoose.Types.ObjectId(),
       },
-    });
+    }); */
 
     // Delete the ClassWork document
     await ClassWork.findByIdAndDelete(id);

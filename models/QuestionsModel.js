@@ -35,7 +35,7 @@ const questionSchema = new mongoose.Schema({
     required: function () {
       return this.questionType !== "file-upload";
     },
-    minlength: [10, "Question text should be at least 10 characters long"],
+    // minlength: [, "Question text should be at least 10 characters long"],
   },
   questionType: {
     type: String,
@@ -50,7 +50,7 @@ const questionSchema = new mongoose.Schema({
     required: true,
   },
   options: {
-    type: [String], // Array of strings representing the options
+    type: [mongoose.Schema.Types.Mixed],
     validate: {
       validator: function (value) {
         // Validate that options are provided for specific question types
@@ -63,6 +63,20 @@ const questionSchema = new mongoose.Schema({
         "Options must be an array with at least two choices for multiple-choice and rank-order questions.",
     },
   },
+  /*   options: {
+    type: [String], // Array of strings representing the options
+    validate: {
+      validator: function (value) {
+        // Validate that options are provided for specific question types
+        if (["multiple-choice", "rank-order"].includes(this.questionType)) {
+          return Array.isArray(value) && value.length >= 2;
+        }
+        return true; // Skip validation for other question types
+      },
+      message:
+        "Options must be an array with at least two choices for multiple-choice and rank-order questions.",
+    },
+  }, */
   correctAnswer: {
     type: [Schema.Types.Mixed], // Allow an array of strings or numbers
     required: true, // All question types require a correctAnswer
@@ -133,7 +147,7 @@ const questionSchema = new mongoose.Schema({
 
   marks: {
     type: Number,
-    required: [true, "Please provide the marks for the question"],
+    required: [true, "Please provide the marks for this question"],
     min: [1, "Marks should be greater than or equal to 1"],
     max: [20, "Marks should not exceed 20"],
   },

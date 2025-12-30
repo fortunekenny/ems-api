@@ -10,6 +10,7 @@ import {
   getLessonNoteByApprovalStatus,
   getLessonNoteByWeek,
   approveLessonNote,
+  updateLessonNoteContent,
 } from "../controllers/lessonNoteController.js";
 import {
   authenticateToken,
@@ -33,7 +34,7 @@ router.get(
   "/",
   authenticateToken,
   checkStatus,
-  authorizeRole("admin", "proprietor"),
+  authorizeRole("admin", "proprietor", "teacher"),
   getAllLessonNotes,
 );
 
@@ -83,8 +84,17 @@ router.patch(
   authorizeRole("admin", "proprietor", "teacher"),
   updateLessonNote,
 );
+
 router.patch(
-  "/approve/:lessonNoteId",
+  "/:id/content",
+  authenticateToken,
+  checkStatus,
+  authorizeRole("admin", "proprietor", "teacher"),
+  updateLessonNoteContent,
+);
+
+router.patch(
+  "/:lessonNoteId/approve",
   authenticateToken,
   authorizeRole("admin", "proprietor"),
   approveLessonNote,

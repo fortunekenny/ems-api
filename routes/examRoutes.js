@@ -46,6 +46,15 @@ router.patch(
   authorizeRole("admin", "proprietor", "teacher"),
   examController.updateExam,
 );
+
+router.patch(
+  "/:id/questionslist",
+  authenticateToken,
+  checkStatus,
+  authorizeRole("admin", "proprietor", "teacher"),
+  examController.updateExamQuestionList,
+);
+
 router.delete(
   "/:id",
   authenticateToken,

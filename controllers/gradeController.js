@@ -3,6 +3,8 @@ import { StatusCodes } from "http-status-codes";
 import BadRequestError from "../errors/bad-request.js";
 import NotFoundError from "../errors/not-found.js";
 import StudentAnswer from "../models/StudentAnswerModel.js";
+import Test from "../models/TestModel.js";
+import Exam from "../models/ExamModel.js";
 import Staff from "../models/StaffModel.js";
 import InternalServerError from "../errors/internal-server-error.js";
 
@@ -16,16 +18,16 @@ export const createGrade = async (req, res, next) => {
       classId,
       session,
       term,
-      markObtainable,
+      /* markObtainable, */
     } = req.body;
 
     if (
       !student ||
       !subject ||
-      !classId ||
-      !session ||
-      !term ||
-      !markObtainable
+      !classId /* || */
+      /* !session || */
+      /* !term || */
+      /* !markObtainable */
     ) {
       throw new BadRequestError("Required fields must be provided.");
     }
@@ -47,14 +49,19 @@ export const createGrade = async (req, res, next) => {
       }
 
       const teacherData = await Staff.findById(subjectTeacherId).populate([
-        { path: "subjects", select: "_id subjectName" },
+        { path: "teacherRecords.subjects", select: "_id subjectName" },
       ]);
       if (!teacherData) {
         throw new NotFoundError("Provided teacher not found.");
       }
 
-      const isAssignedSubject = teacherData.subjects.some(
-        (subjectItem) => subjectItem && subjectItem.equals(subject),
+      // Check if subject is assigned in any of the teacher's records
+      const isAssignedSubject = teacherData.teacherRecords.some(
+        (record) =>
+          record.subjects &&
+          record.subjects.some(
+            (subjectItem) => subjectItem && subjectItem.equals(subject),
+          ),
       );
 
       if (!isAssignedSubject) {
@@ -63,13 +70,20 @@ export const createGrade = async (req, res, next) => {
         );
       }
     } else if (userRole === "teacher") {
-      const teacherData = await Staff.findById(userId).populate("subjects");
+      const teacherData = await Staff.findById(userId).populate([
+        { path: "teacherRecords.subjects", select: "_id subjectName" },
+      ]);
       if (!teacherData) {
         throw new NotFoundError("Teacher not found.");
       }
 
-      isAuthorized = teacherData.subjects.some(
-        (subjectItem) => subjectItem.toString() === subject.toString(),
+      // Check if the teacher is assigned to this subject in any record
+      isAuthorized = teacherData.teacherRecords.some(
+        (record) =>
+          record.subjects &&
+          record.subjects.some(
+            (subjectItem) => subjectItem.toString() === subject.toString(),
+          ),
       );
 
       if (!isAuthorized) {
@@ -87,38 +101,88 @@ export const createGrade = async (req, res, next) => {
       );
     }
 
-    const evaluationData = await StudentAnswer.find({
+    // Build the filter for StudentAnswer—term and session are optional
+    const evaluationFilter = {
       student: student,
       classId: classId,
       subject: subject,
-      term: term,
-      session: session,
-    });
+    };
+    if (term) evaluationFilter.term = term;
+    if (session) evaluationFilter.session = session;
+
+    const evaluationData = await StudentAnswer.find(evaluationFilter);
 
     if (evaluationData.length === 0) {
-      throw new NotFoundError("Evaluation not found.");
+      throw new NotFoundError(
+        `Evaluation not found for student=${student}, subject=${subject}, classId=${classId}${
+          term ? `, term=${term}` : ""
+        }${session ? `, session=${session}` : ""}`,
+      );
     }
 
     let exam = null;
     let examScore = 0;
+    let examEvaluationId = null;
     const tests = [];
     let testsScore = 0;
+    const testEvaluationIds = [];
 
     for (const studentAnswer of evaluationData) {
       if (studentAnswer.evaluationType === "Exam") {
         // Update exam-related fields
         exam = studentAnswer._id;
-        examScore = Number(studentAnswer.markObtained);
+        examScore = Number(studentAnswer.markObtained || 0);
+        examEvaluationId = studentAnswer.evaluationTypeId || null;
       } else if (studentAnswer.evaluationType === "Test") {
         // Update test-related fields
         tests.push(studentAnswer._id);
-        testsScore += studentAnswer.markObtained;
+        testsScore += Number(studentAnswer.markObtained || 0);
+        if (studentAnswer.evaluationTypeId)
+          testEvaluationIds.push(String(studentAnswer.evaluationTypeId));
       }
     }
 
     const markObtained = examScore + testsScore;
 
-    const percentageScore = (markObtained / Number(markObtainable)) * 100;
+    // Compute markObtainable by summing the marks obtainable from the related Test and Exam evaluations
+    const uniqueTestEvalIds = [...new Set(testEvaluationIds)];
+    const testDocs = uniqueTestEvalIds.length
+      ? await Test.find({ _id: { $in: uniqueTestEvalIds } })
+      : [];
+    const examDoc = examEvaluationId
+      ? await Exam.findById(String(examEvaluationId))
+      : null;
+
+    // Use the explicit `marksObtainable` field from Test and Exam documents.
+    const testsMarksObtainable = testDocs.reduce(
+      (sum, t) => sum + Number(t.marksObtainable || 0),
+      0,
+    );
+    const examMarksObtainable = Number(
+      (examDoc && examDoc.marksObtainable) || 0,
+    );
+
+    const markObtainable = testsMarksObtainable + examMarksObtainable;
+
+    const percentageScore =
+      markObtainable > 0 ? (markObtained / Number(markObtainable)) * 100 : 0;
+
+    console.log(
+      "examScore",
+      examScore,
+      "testsScore",
+      testsScore,
+      "markObtained",
+      markObtained,
+      "testsMarksObtainable",
+      testsMarksObtainable,
+      "examMarksObtainable",
+      examMarksObtainable,
+      "markObtainable",
+      markObtainable,
+      "percentageScore",
+      percentageScore,
+    );
 
     const grade = (() => {
       if (percentageScore < 30) return "F";
@@ -160,11 +224,13 @@ export const createGrade = async (req, res, next) => {
     //Compute the student's position (ranking) based on percentageScore.
     // Retrieve all report cards for the class, term, and session, sorted descending.
 
-    const allGrades = await Grade.find({
-      classId,
-      term,
-      session,
-    }).sort({ percentageScore: -1 });
+    const rankingFilter = { classId };
+    if (term) rankingFilter.term = term;
+    if (session) rankingFilter.session = session;
+
+    const allGrades = await Grade.find(rankingFilter).sort({
+      percentageScore: -1,
+    });
 
     let currentRank = 0;
     let lastPercentage = null;
@@ -178,12 +244,11 @@ export const createGrade = async (req, res, next) => {
       }
       // Else if equal, currentRank remains the same (tie).
       lastPercentage = g.percentageScore;
-      if (g._id.equals(grade._id)) {
+      if (g._id.equals(newGrade._id)) {
         // Update the newly created report card's position in the database.
-        await Grade.findByIdAndUpdate(grade._id, {
+        await Grade.findByIdAndUpdate(newGrade._id, {
           position: currentRank,
         });
-        grade.position = currentRank;
         break;
       }
     }

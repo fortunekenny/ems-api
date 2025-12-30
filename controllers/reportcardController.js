@@ -760,21 +760,23 @@ export const getReportCardById = async (req, res, next) => {
   try {
     const { id } = req.params;
 
-    const reportCard = await ReportCard.findById(id).populate([
-      {
+    const reportCard = await ReportCard.findById(id)
+      .populate({
         path: "subjectsGrade",
         select:
           "gradeId subjectId subjectName testScore examScore markObtained grade percentage markObtainable remark",
-      },
-      { path: "classId", select: "_id className" },
-      { path: "student", select: "_id firstName middleName lastName" },
-      { path: "teacher", select: "_id firstName lastName" },
-    ]);
+      })
+      .populate({ path: "classId", select: "_id className" })
+      .populate({
+        path: "student",
+        select: "_id firstName middleName lastName",
+      })
+      .populate({ path: "teacher", select: "_id firstName lastName" });
     if (!reportCard) {
       throw new NotFoundError("Report card not found");
     }
 
-    res.status(StatusCodes.OK).json(reportCard);
+    res.status(StatusCodes.OK).json({ ...reportCard.toObject() });
   } catch (error) {
     console.log("Error getting report card by ID:", error);
     next(new InternalServerError(error.message));

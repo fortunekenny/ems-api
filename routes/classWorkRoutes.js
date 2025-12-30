@@ -6,6 +6,7 @@ import {
   updateClassWork,
   submitClassWork,
   deleteClassWork,
+  updateClassWorkQuestionList,
 } from "../controllers/classWorkController.js";
 import {
   authenticateToken,
@@ -53,6 +54,15 @@ router.patch(
   authorizeRole("admin", "proprietor", "teacher"),
   updateClassWork,
 ); // Update ClassWork
+
+router.patch(
+  "/:id/questionslist",
+  authenticateToken,
+  checkStatus,
+  authorizeRole("admin", "proprietor", "teacher"),
+  updateClassWorkQuestionList,
+); // Update ClassWork
+
 router.delete(
   "/:id",
   authenticateToken,
