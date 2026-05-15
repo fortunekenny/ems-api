@@ -5,6 +5,7 @@ import {
   getDiaryById,
   updateDiary,
   approveDiary,
+  copyDiaryToCurrentSession,
   deleteDiary,
 } from "../controllers/diaryController.js";
 // import authMiddleware from "../middleware/authMiddleware.js"; // Assuming this handles user authentication
@@ -57,6 +58,15 @@ router.patch(
   authenticateToken,
   authorizeRole("admin", "proprietor"),
   approveDiary,
+);
+
+// Route to copy a diary from previous session to current session by matching criteria
+router.post(
+  "/copy-to-current",
+  authenticateToken,
+  checkStatus,
+  authorizeRole("admin", "teacher", "proprietor"),
+  copyDiaryToCurrentSession,
 );
 
 // Route to delete a diary entry by ID

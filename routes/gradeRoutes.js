@@ -42,6 +42,14 @@ router.get(
   gradeController.getGradeById,
 );
 
+// Download a grade PDF
+router.get(
+  "/:id/download",
+  authenticateToken,
+  authorizeRole("admin", "proprietor", "teacher", "student", "parent"),
+  gradeController.downloadStudentGrades,
+);
+
 // Update a grade
 router.patch(
   "/:id",

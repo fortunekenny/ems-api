@@ -36,7 +36,7 @@ export const createFee = async (req, res, next) => {
 };
 
 // Get all fee records
-export const getFees = async (req, res) => {
+export const getFees = async (req, res, next) => {
   try {
     const fees = await Fee.find()
       .populate("student", "name") // populate student's name
@@ -49,7 +49,7 @@ export const getFees = async (req, res) => {
 };
 
 // Get fee record by ID
-export const getFeeById = async (req, res) => {
+export const getFeeById = async (req, res, next) => {
   try {
     const fee = await Fee.findById(req.params.id)
       .populate("student", "name")
@@ -65,7 +65,7 @@ export const getFeeById = async (req, res) => {
 };
 
 // Record an installment payment
-export const recordInstallment = async (req, res) => {
+export const recordInstallment = async (req, res, next) => {
   try {
     const { amount, datePaid } = req.body;
     const fee = await Fee.findById(req.params.id);
@@ -86,7 +86,7 @@ export const recordInstallment = async (req, res) => {
 };
 
 // Update a fee record (e.g., if fee amount changes)
-export const updateFee = async (req, res) => {
+export const updateFee = async (req, res, next) => {
   try {
     const { amountDue, dueDate, session, term } = req.body;
     const updatedFee = await Fee.findByIdAndUpdate(
@@ -105,7 +105,7 @@ export const updateFee = async (req, res) => {
 };
 
 // Delete a fee record
-export const deleteFee = async (req, res) => {
+export const deleteFee = async (req, res, next) => {
   try {
     const fee = await Fee.findByIdAndDelete(req.params.id);
     if (!fee) {

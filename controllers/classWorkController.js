@@ -32,9 +32,8 @@ export const createClassWork = async (req, res, next) => {
      } */
 
     // Fetch and validate the lesson note
-    const note = await LessonNote.findById(lessonNote).populate(
-      "classId subject",
-    );
+    const note =
+      await LessonNote.findById(lessonNote).populate("classId subject");
     if (!note) {
       throw new BadRequestError("Lesson note not found.");
     }
@@ -868,6 +867,6 @@ export const deleteClassWork = async (req, res, next) => {
       .json({ message: "ClassWork deleted successfully." });
   } catch (error) {
     console.error("Error deleting class work:", error);
-    next(new BadRequestError(error.message));
+    next(new InternalServerError(error.message));
   }
 };

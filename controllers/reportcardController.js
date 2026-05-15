@@ -1,16 +1,17 @@
-import ReportCard from "../models/ReportcardModel.js";
-import Student from "../models/StudentModel.js";
 import { StatusCodes } from "http-status-codes";
 import BadRequestError from "../errors/bad-request.js";
-import NotFoundError from "../errors/not-found.js";
 import InternalServerError from "../errors/internal-server-error.js";
-import Grade from "../models/GradeModel.js";
+import NotFoundError from "../errors/not-found.js";
 import Class from "../models/ClassModel.js";
+import Grade from "../models/GradeModel.js";
+import ReportCard from "../models/ReportcardModel.js";
 import Staff from "../models/StaffModel.js";
+import Student from "../models/StudentModel.js";
+import PDFDocument from "pdfkit";
 import {
-  getCurrentTermDetails,
+  getCurrentTermDetails, // Ensure this is correctly defined
+  holidayDurationForEachTerm,
   startTermGenerationDate, // Ensure this is correctly defined
-  holidayDurationForEachTerm, // Ensure this is correctly defined
 } from "../utils/termGenerator.js"; // Import getCurrentTermDetails
 
 const { session, term, endDate } = getCurrentTermDetails(
@@ -25,7 +26,7 @@ const { session, term, endDate } = getCurrentTermDetails(
 export const createReportCard = async (req, res, next) => {
   try {
     // Only allow report card creation within the last 2 days before endDate
-    const twoDaysBeforeEnd = new Date(endDate);
+    /* const twoDaysBeforeEnd = new Date(endDate);
     twoDaysBeforeEnd.setDate(twoDaysBeforeEnd.getDate() - 1);
     if (Date.now() < twoDaysBeforeEnd) {
       throw new BadRequestError(
@@ -33,7 +34,7 @@ export const createReportCard = async (req, res, next) => {
           endDate,
         ).toDateString()}.`,
       );
-    }
+    } */
 
     const {
       student,
@@ -63,20 +64,34 @@ export const createReportCard = async (req, res, next) => {
         );
       }
 
-      const teacherData = await Staff.findById(classTeacherId).populate(
-        "isClassTeacher",
+      const teacherData = await Staff.findById(classTeacherId);
+      /*       console.log('session ', teacherData.teacherRecords[0].session);
+            console.log('term ', teacherData.teacherRecords[0].term);
+            console.log('isClassTeacher ', teacherData.teacherRecords[0].isClassTeacher);*/
+      // console.log('term ', term, 'session ', session);
+
+      const isClassTeacher = teacherData?.teacherRecords?.some(
+        (record) =>
+          record.isClassTeacher?.toString() === classId.toString() &&
+          record.session === session &&
+          record.term === term,
       );
-      if (!teacherData || !teacherData.isClassTeacher.equals(classId)) {
+
+      if (!isClassTeacher) {
         throw new BadRequestError("Teacher is not the class teacher.");
       }
     } else if (userRole === "teacher") {
-      const teacherData = await Staff.findById(userId).populate(
-        "isClassTeacher",
+      const teacherData = await Staff.findById(userId);
+      const isClassTeacher = teacherData?.teacherRecords?.some(
+        (record) =>
+          record.isClassTeacher?.toString() === classId.toString() &&
+          record.session === session &&
+          record.term === term,
       );
-      if (!teacherData || !teacherData.isClassTeacher.equals(classId)) {
-        throw new BadRequestError(
-          "You are not authorized to create a report card.",
-        );
+
+      if (!isClassTeacher) {
+        // match the admin error message so tests/assertions stay consistent
+        throw new BadRequestError("Teacher is not the class teacher.");
       }
       isAuthorized = true;
     }
@@ -96,6 +111,10 @@ export const createReportCard = async (req, res, next) => {
     })
       .populate("subjects", "subjectName")
       .exec(); // Populate subject names
+
+    /* console.log('classData id', classData._id);
+    console.log('classData session', classData.session);
+    console.log('classData term', classData.term); */
 
     if (!classData) {
       throw new NotFoundError("Class not found");
@@ -162,6 +181,8 @@ export const createReportCard = async (req, res, next) => {
       classId,
       term,
       session,
+      // term: 'third',
+      // session: '2024/2025',
     });
 
     // if (gradeData.length === 0 || gradeData.length !== subjects.length ) {
@@ -176,6 +197,7 @@ export const createReportCard = async (req, res, next) => {
 
     for (const attendance of attendanceData) {
       if (attendance.updatedAt >= endDate) {
+        // if (attendance) {
         numberOfTimesPresent = attendance.totalDaysPresent;
         numberOfTimesAbsent = attendance.totalDaysAbsent;
         numberOfTimesSchoolOpened = attendance.totalDaysSchoolOpened;
@@ -332,17 +354,27 @@ export const createReportCardsForClass = async (req, res, next) => {
           "For admin or proprietor, the 'teacher' field must be provided.",
         );
       }
-      const teacherData = await Staff.findById(classTeacherId).populate(
-        "isClassTeacher",
+      const teacherData = await Staff.findById(classTeacherId);
+      const isClassTeacher = teacherData?.teacherRecords?.some(
+        (record) =>
+          record.isClassTeacher?.toString() === classId.toString() &&
+          record.session === session &&
+          record.term === term,
       );
-      if (!teacherData || !teacherData.isClassTeacher.equals(classId)) {
+
+      if (!isClassTeacher) {
         throw new BadRequestError("Teacher is not the class teacher.");
       }
     } else if (userRole === "teacher") {
-      const teacherData = await Staff.findById(userId).populate(
-        "isClassTeacher",
+      const teacherData = await Staff.findById(userId);
+      const isClassTeacher = teacherData?.teacherRecords?.some(
+        (record) =>
+          record.isClassTeacher?.toString() === classId.toString() &&
+          record.session === session &&
+          record.term === term,
       );
-      if (!teacherData || !teacherData.isClassTeacher.equals(classId)) {
+
+      if (!isClassTeacher) {
         throw new BadRequestError("You are not the class teacher.");
       }
       isAuthorized = true;
@@ -666,8 +698,8 @@ export const getReportCards = async (req, res, next) => {
     // Sorting stage: define sort options.
     // Adjust the sort options to suit your requirements.
     const sortOptions = {
-      // newest: { createdAt: -1 },
-      // oldest: { createdAt: 1 },
+      newest: { createdAt: -1 },
+      oldest: { createdAt: 1 },
       "a-z": { "studentData.firstName": 1 },
       "z-a": { "studentData.firstName": -1 },
       lastPosition: { position: -1 },
@@ -681,6 +713,7 @@ export const getReportCards = async (req, res, next) => {
       lowestMarkObtained: { overallMarkObtained: -1 },
       highestMarkObtained: { overallMarkObtained: 1 },
     };
+    // default to newest if no valid sort provided
     const sortKey = sortOptions[sort] || sortOptions.newest;
     pipeline.push({ $sort: sortKey });
 
@@ -780,6 +813,530 @@ export const getReportCardById = async (req, res, next) => {
   } catch (error) {
     console.log("Error getting report card by ID:", error);
     next(new InternalServerError(error.message));
+  }
+};
+
+// Download student report card as PDF
+export const downloadStudentReportCard = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+
+    const reportCard = await ReportCard.findById(id)
+      .populate({
+        path: "subjectsGrade",
+        select:
+          "gradeId subjectId subjectName testScore examScore markObtained grade percentage markObtainable remark",
+      })
+      .populate({ path: "classId", select: "_id className" })
+      .populate({
+        path: "student",
+        select: "_id firstName middleName lastName",
+      })
+      .populate({ path: "teacher", select: "_id firstName lastName" });
+
+    if (!reportCard) {
+      return next(new NotFoundError("Report card not found."));
+    }
+
+    const doc = new PDFDocument({ margin: 50 });
+
+    const fileName = `${reportCard.student.firstName}_${reportCard.student.lastName}_Report_Card_${reportCard.term}_${reportCard.session.replace(/\//g, "-")}.pdf`;
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+
+    doc.pipe(res);
+
+    // Color palette
+    const colors = {
+      primary: "#2563eb",
+      secondary: "#1e40af",
+      success: "#16a34a",
+      danger: "#dc2626",
+      text: "#1f2937",
+      textLight: "#6b7280",
+      border: "#e5e7eb",
+      cardBg: "#f9fafb",
+      accent: "#8b5cf6",
+      tableHeaderBg: "#f3f4f6", // very light gray for table header
+    };
+
+    // Utility — Modern section header
+    const sectionHeader = (title) => {
+      doc.moveDown(0.8);
+
+      const headerY = doc.y;
+
+      // Background bar
+      doc
+        .rect(40, headerY, 520, 28)
+        .fillAndStroke(colors.primary, colors.secondary);
+
+      // Title text
+      doc
+        .fillColor("#ffffff")
+        .font("Helvetica-Bold")
+        .fontSize(13)
+        .text(title, 55, headerY + 8);
+
+      doc.y = headerY + 28;
+      doc.moveDown(1);
+    };
+
+    // Utility — Info box
+    const infoBox = (label, value) => {
+      doc
+        .font("Helvetica-Bold")
+        .fontSize(10)
+        .fillColor(colors.textLight)
+        .text(`${label}:`, { continued: true });
+
+      doc
+        .font("Helvetica")
+        .fontSize(10)
+        .fillColor(colors.text)
+        .text(` ${value || "N/A"}`);
+
+      doc.moveDown(0.3);
+    };
+
+    // HEADER WITH SCHOOL BRANDING
+    // Top accent bar
+    doc.rect(0, 0, 612, 8).fillAndStroke(colors.primary, colors.secondary);
+
+    doc.y = 30;
+
+    // School name
+    doc
+      .font("Helvetica-Bold")
+      .fontSize(24)
+      .fillColor(colors.primary)
+      .text("SHEPHERD NURSERY & PRIMARY SCHOOL", { align: "center" });
+
+    doc.moveDown(0.4);
+
+    doc
+      .font("Helvetica-Oblique")
+      .fontSize(10)
+      .fillColor(colors.textLight)
+      .text("Student Term Report Card", { align: "center" });
+
+    doc.moveDown(0.8);
+
+    // Decorative divider
+    const dividerY = doc.y;
+    doc
+      .moveTo(150, dividerY)
+      .lineTo(462, dividerY)
+      .strokeColor(colors.primary)
+      .lineWidth(2)
+      .stroke();
+
+    doc.circle(150, dividerY, 4).fillAndStroke(colors.accent, colors.accent);
+    doc.circle(462, dividerY, 4).fillAndStroke(colors.accent, colors.accent);
+
+    doc.moveDown(1.5);
+
+    // STUDENT INFO CARD & ATTENDANCE
+    const cardY = doc.y;
+    const cardHeight = 125;
+
+    // Shadow
+    doc
+      .rect(53, cardY + 3, 506, cardHeight)
+      .fillOpacity(0.1)
+      .fill("#000000")
+      .fillOpacity(1);
+
+    // Main card
+    doc
+      .roundedRect(50, cardY, 506, cardHeight, 8)
+      .fillAndStroke(colors.cardBg, colors.border);
+
+    doc.y = cardY + 10;
+    sectionHeader("Student & Term Information");
+
+    // Split info into two columns
+    const col1X = 55;
+    const col2X = 300;
+
+    doc.y = cardY + 50;
+    const infoStartY = doc.y;
+
+    // Column 1
+    infoBox(
+      "Name",
+      `${reportCard.student.firstName} ${reportCard.student.lastName}`,
+    );
+    infoBox("Class", reportCard.classId.className);
+    if (reportCard.teacher) {
+      infoBox(
+        "Class Teacher",
+        `${reportCard.teacher.firstName} ${reportCard.teacher.lastName}`,
+      );
+    } else {
+      infoBox("Class Teacher", "N/A");
+    }
+
+    // Column 2
+    doc.y = infoStartY;
+    doc.x = col2X;
+    infoBox("Term", reportCard.term);
+    doc.x = col2X; // resetting X because continued text resets it to margin sometimes
+    infoBox("Session", reportCard.session);
+    doc.x = col2X;
+    infoBox(
+      "Attendance",
+      `${reportCard.numberOfTimesPresent} / ${reportCard.numberOfTimesSchoolOpened} days`,
+    );
+
+    // Reset X for main flow
+    doc.x = 50;
+    doc.y = cardY + cardHeight + 20;
+
+    // PERFORMANCE SUMMARY CARD
+    const summaryCardY = doc.y;
+    const summaryHeight = 90;
+
+    // Shadow
+    doc
+      .rect(53, summaryCardY + 3, 506, summaryHeight)
+      .fillOpacity(0.1)
+      .fill("#000000")
+      .fillOpacity(1);
+
+    // Main summary card
+    doc
+      .roundedRect(50, summaryCardY, 506, summaryHeight, 8)
+      .fillAndStroke("#f0f9ff", colors.border); // Light blue background
+
+    doc.rect(50, summaryCardY, 10, summaryHeight).fill(colors.accent);
+
+    doc.y = summaryCardY + 15;
+
+    // Centered content for summary
+    const sumColWidth = 506 / 3;
+
+    // Total Marks
+    doc
+      .font("Helvetica-Bold")
+      .fontSize(11)
+      .fillColor(colors.textLight)
+      .text("Total Marks", 60, doc.y, { width: sumColWidth, align: "center" });
+
+    doc
+      .font("Helvetica-Bold")
+      .fontSize(24)
+      .fillColor(colors.primary)
+      .text(`${reportCard.overallMarkObtained || 0}`, 60, summaryCardY + 40, {
+        width: sumColWidth,
+        align: "center",
+      });
+
+    // Percentage
+    doc
+      .font("Helvetica-Bold")
+      .fontSize(11)
+      .fillColor(colors.textLight)
+      .text("Percentage", 60 + sumColWidth, summaryCardY + 15, {
+        width: sumColWidth,
+        align: "center",
+      });
+
+    doc
+      .font("Helvetica-Bold")
+      .fontSize(24)
+      .fillColor(colors.primary)
+      .text(
+        `${reportCard.overallPercentage || 0}%`,
+        60 + sumColWidth,
+        summaryCardY + 40,
+        { width: sumColWidth, align: "center" },
+      );
+
+    // Position
+    doc
+      .font("Helvetica-Bold")
+      .fontSize(11)
+      .fillColor(colors.textLight)
+      .text("Position", 60 + sumColWidth * 2, summaryCardY + 15, {
+        width: sumColWidth,
+        align: "center",
+      });
+
+    if (reportCard.position) {
+      doc
+        .font("Helvetica-Bold")
+        .fontSize(24)
+        .fillColor(colors.accent)
+        .text(
+          `${reportCard.position}`,
+          60 + sumColWidth * 2,
+          summaryCardY + 40,
+          { width: sumColWidth, align: "center" },
+        );
+    } else {
+      doc
+        .font("Helvetica-Bold")
+        .fontSize(20)
+        .fillColor(colors.textLight)
+        .text("N/A", 60 + sumColWidth * 2, summaryCardY + 42, {
+          width: sumColWidth,
+          align: "center",
+        });
+    }
+
+    doc.x = 50;
+    doc.y = summaryCardY + summaryHeight + 20;
+
+    // ACADEMIC RECORD / SUBJECTS LIST
+    sectionHeader("Academic Record");
+
+    // Table settings
+    const tableX = 50;
+    let tableY = doc.y;
+
+    // Column definitions
+    const colSubject = 170;
+    const colTests = 60;
+    const colExam = 60;
+    const colTotal = 60;
+    const colGrade = 50;
+    const colRemark = 106;
+
+    const rowHeight = 25;
+
+    // Draw table header background
+    doc
+      .rect(tableX, tableY, 506, rowHeight)
+      .fillAndStroke(colors.tableHeaderBg, colors.border);
+
+    doc.fillColor(colors.primary).font("Helvetica-Bold").fontSize(10);
+
+    let currentX = tableX + 5;
+    doc.text("Subject", currentX, tableY + 8, { width: colSubject - 10 });
+    currentX += colSubject;
+    doc.text("Tests", currentX, tableY + 8, {
+      width: colTests,
+      align: "center",
+    });
+    currentX += colTests;
+    doc.text("Exam", currentX, tableY + 8, { width: colExam, align: "center" });
+    currentX += colExam;
+    doc.text("Total", currentX, tableY + 8, {
+      width: colTotal,
+      align: "center",
+    });
+    currentX += colTotal;
+    doc.text("Grade", currentX, tableY + 8, {
+      width: colGrade,
+      align: "center",
+    });
+    currentX += colGrade;
+    doc.text("Remark", currentX, tableY + 8, {
+      width: colRemark - 5,
+      align: "center",
+    });
+
+    tableY += rowHeight;
+
+    // Draw subjects
+    if (reportCard.subjectsGrade && reportCard.subjectsGrade.length > 0) {
+      reportCard.subjectsGrade.forEach((sg, i) => {
+        // Page break logic inside the table
+        if (tableY > doc.page.height - 100) {
+          doc.addPage();
+          tableY = 50;
+
+          // Re-draw header on new page
+          doc
+            .rect(tableX, tableY, 506, rowHeight)
+            .fillAndStroke(colors.tableHeaderBg, colors.border);
+
+          doc.fillColor(colors.primary).font("Helvetica-Bold").fontSize(10);
+
+          currentX = tableX + 5;
+          doc.text("Subject", currentX, tableY + 8, { width: colSubject - 10 });
+          currentX += colSubject;
+          doc.text("Tests", currentX, tableY + 8, {
+            width: colTests,
+            align: "center",
+          });
+          currentX += colExam;
+          doc.text("Exam", currentX, tableY + 8, {
+            width: colExam,
+            align: "center",
+          });
+          currentX += colTotal;
+          doc.text("Total", currentX, tableY + 8, {
+            width: colTotal,
+            align: "center",
+          });
+          currentX += colGrade;
+          doc.text("Grade", currentX, tableY + 8, {
+            width: colGrade,
+            align: "center",
+          });
+          currentX += colRemark;
+          doc.text("Remark", currentX, tableY + 8, {
+            width: colRemark - 5,
+            align: "center",
+          });
+
+          tableY += rowHeight;
+        }
+
+        // Row background (alternating)
+        if (i % 2 === 1) {
+          doc.rect(tableX, tableY, 506, rowHeight).fill("#fafafa");
+        }
+
+        doc.fillColor(colors.text).font("Helvetica").fontSize(9);
+
+        currentX = tableX + 5;
+        doc.text(sg.subjectName || "Unknown Subject", currentX, tableY + 8, {
+          width: colSubject - 10,
+        });
+        currentX += colSubject;
+        doc.text((sg.testScore ?? 0).toString(), currentX, tableY + 8, {
+          width: colTests,
+          align: "center",
+        });
+        currentX += colTests;
+        doc.text((sg.examScore ?? 0).toString(), currentX, tableY + 8, {
+          width: colExam,
+          align: "center",
+        });
+        currentX += colExam;
+        doc.text((sg.markObtained ?? 0).toString(), currentX, tableY + 8, {
+          width: colTotal,
+          align: "center",
+        });
+        currentX += colTotal;
+
+        // Slightly bold the grade
+        doc.font("Helvetica-Bold");
+        if (sg.grade === "A" || sg.grade === "B") doc.fillColor(colors.success);
+        else if (sg.grade === "C" || sg.grade === "D")
+          doc.fillColor(colors.secondary);
+        else doc.fillColor(colors.danger);
+
+        doc.text(sg.grade || "N/A", currentX, tableY + 8, {
+          width: colGrade,
+          align: "center",
+        });
+
+        // Reset color and font for remark
+        doc.fillColor(colors.textLight).font("Helvetica");
+        currentX += colGrade;
+        doc.text(sg.remark || "-", currentX, tableY + 8, {
+          width: colRemark - 5,
+          align: "center",
+        });
+
+        // Draw horizontal border
+        doc
+          .moveTo(tableX, tableY + rowHeight)
+          .lineTo(tableX + 506, tableY + rowHeight)
+          .strokeColor(colors.border)
+          .lineWidth(1)
+          .stroke();
+
+        tableY += rowHeight;
+      });
+      // Outer border for the table
+      doc
+        .rect(
+          tableX,
+          tableY - reportCard.subjectsGrade.length * rowHeight - rowHeight,
+          506,
+          reportCard.subjectsGrade.length * rowHeight + rowHeight,
+        )
+        .strokeColor(colors.border)
+        .lineWidth(1)
+        .stroke();
+    } else {
+      doc
+        .font("Helvetica-Oblique")
+        .fontSize(10)
+        .fillColor(colors.textLight)
+        .text("No subject data available.", tableX + 10, tableY + 10);
+      tableY += 30;
+    }
+
+    // REMARKS & FOOTER SECTION
+    doc.y = tableY + 30;
+
+    // Check if we need a new page for remarks
+    if (doc.y > doc.page.height - 150) {
+      doc.addPage();
+      doc.y = 50;
+    }
+
+    doc
+      .font("Helvetica-Bold")
+      .fontSize(11)
+      .fillColor(colors.primary)
+      .text("Class Teacher's Comment:");
+    doc.moveDown(0.3);
+
+    doc
+      .font("Helvetica-Oblique")
+      .fontSize(10)
+      .fillColor(colors.text)
+      .text(reportCard.teacherComment || "Yet to comment.");
+
+    doc.moveDown(1.5);
+
+    // Next term resumption
+    if (reportCard.nextTermResumptionDate) {
+      doc
+        .font("Helvetica-Bold")
+        .fontSize(10)
+        .fillColor(colors.textLight)
+        .text("Next Term Resumes: ", { continued: true })
+        .font("Helvetica")
+        .fillColor(colors.text)
+        .text(
+          new Date(reportCard.nextTermResumptionDate).toLocaleDateString(
+            "en-US",
+            { year: "numeric", month: "long", day: "numeric" },
+          ),
+        );
+    }
+
+    // Bottom decorative line
+    doc.moveDown(2);
+    doc
+      .moveTo(50, doc.y)
+      .lineTo(556, doc.y)
+      .strokeColor(colors.border)
+      .lineWidth(1)
+      .stroke();
+
+    doc.moveDown(0.5);
+
+    doc
+      .font("Helvetica-Oblique")
+      .fontSize(8)
+      .fillColor(colors.textLight)
+      .text(
+        `Document generated on ${new Date().toLocaleString("en-US", {
+          dateStyle: "long",
+          timeStyle: "short",
+        })}`,
+        { align: "center" },
+      );
+
+    // Bottom accent bar
+    doc
+      .rect(0, doc.page.height - 8, 612, 8)
+      .fillAndStroke(colors.primary, colors.secondary);
+
+    doc.end();
+  } catch (error) {
+    console.log("Error generating report card PDF:", error);
+    next(new InternalServerError("Failed to generate PDF."));
   }
 };
 

@@ -1,5 +1,7 @@
 import Diary from "../models/DiaryModel.js";
 import Staff from "../models/StaffModel.js";
+import Class from "../models/ClassModel.js";
+import Subject from "../models/SubjectModel.js";
 import {
   getCurrentTermDetails,
   startTermGenerationDate,
@@ -7,6 +9,8 @@ import {
 } from "../utils/termGenerator.js";
 import { StatusCodes } from "http-status-codes";
 import BadRequestError from "../errors/bad-request.js";
+import InternalServerError from "../errors/internal-server-error.js";
+import NotFoundError from "../errors/not-found.js";
 
 export const createDiary = async (req, res, next) => {
   try {
@@ -70,11 +74,8 @@ export const createDiary = async (req, res, next) => {
 
     res.status(StatusCodes.CREATED).json(diary);
   } catch (error) {
-    next(
-      error instanceof BadRequestError
-        ? error
-        : new BadRequestError(error.message),
-    );
+    console.error("Error creating diary entry:", error);
+    next(new InternalServerError(error.message));
   }
 };
 
@@ -88,7 +89,8 @@ export const getAllDairies = async (req, res, next) => {
     ]);
     res.status(StatusCodes.OK).json(dairies);
   } catch (error) {
-    next(error);
+    console.error("Error fetching diaries:", error);
+    next(new InternalServerError(error.message));
   }
 };
 
@@ -116,7 +118,8 @@ export const getDiaryById = async (req, res, next) => {
     if (!diary) throw new NotFoundError("Diary entry not found");
     res.status(StatusCodes.OK).json(diary);
   } catch (error) {
-    next(error);
+    console.error("Error fetching diary entry:", error);
+    next(new InternalServerError(error.message));
   }
 };
 
@@ -156,7 +159,8 @@ export const updateDiary = async (req, res, next) => {
       .status(StatusCodes.OK)
       .json({ message: "diary updated successfully.", updatedDiary });
   } catch (error) {
-    next(new BadRequestError(error.message));
+    console.error("Error updating diary entry:", error);
+    next(new InternalServerError(error.message));
   }
 };
 
@@ -197,7 +201,7 @@ export const approveDiary = async (req, res, next) => {
     });
   } catch (error) {
     console.error("Error approving diary:", error);
-    next(new BadRequestError(error.message));
+    next(new InternalServerError(error.message));
   }
 };
 
@@ -210,6 +214,141 @@ export const deleteDiary = async (req, res, next) => {
       .status(StatusCodes.OK)
       .json({ message: "Diary entry deleted successfully" });
   } catch (error) {
-    next(error);
+    console.error("Error deleting diary entry:", error);
+    next(new InternalServerError(error.message));
+  }
+};
+
+// Copy topic and subTopics from a previous-session diary to the current session.
+// Validates that the source diary's className, subjectName, term, and lessonWeek
+// all match the provided className, subjectName, and the auto-derived current term and weekOfTerm.
+export const copyDiaryToCurrentSession = async (req, res, next) => {
+  try {
+    const { diaryId, className, subjectName, currentSubjectId } = req.body;
+
+    if (!diaryId || !className || !subjectName || !currentSubjectId) {
+      throw new BadRequestError(
+        "diaryId, className, subjectName, and currentSubjectId are all required.",
+      );
+    }
+
+    // Fetch source diary with populated class and subject names
+    const sourceDiary = await Diary.findById(diaryId).populate([
+      { path: "classId", select: "_id className" },
+      { path: "subject", select: "_id subjectName" },
+    ]);
+
+    if (!sourceDiary) {
+      throw new NotFoundError("Source diary entry not found.");
+    }
+
+    // Derive current session, term, and week
+    const {
+      session: currentSession,
+      term: currentTerm,
+      weekOfTerm: currentWeek,
+    } = getCurrentTermDetails(
+      startTermGenerationDate,
+      holidayDurationForEachTerm,
+    );
+
+    // Validate: source diary must not already be in the current session
+    if (sourceDiary.session === currentSession) {
+      throw new BadRequestError(
+        "The selected diary already belongs to the current session.",
+      );
+    }
+
+    // Validate: source diary's className must match the provided className
+    if (sourceDiary.classId.className !== className) {
+      throw new BadRequestError(
+        `Source diary class "${sourceDiary.classId.className}" does not match "${className}".`,
+      );
+    }
+
+    // Validate: source diary's subjectName must match the provided subjectName
+    if (sourceDiary.subject.subjectName !== subjectName) {
+      throw new BadRequestError(
+        `Source diary subject "${sourceDiary.subject.subjectName}" does not match "${subjectName}".`,
+      );
+    }
+
+    // Validate: source diary's term must match the current term
+    if (sourceDiary.term !== currentTerm) {
+      throw new BadRequestError(
+        `Source diary term "${sourceDiary.term}" does not match the current term "${currentTerm}".`,
+      );
+    }
+
+    // Validate: source diary's lessonWeek must match the current week of term
+    if (sourceDiary.lessonWeek !== currentWeek) {
+      throw new BadRequestError(
+        `Source diary lesson week "${sourceDiary.lessonWeek}" does not match the current week "${currentWeek}".`,
+      );
+    }
+
+    // Resolve subjectTeacher based on role
+    const userId = req.user.id;
+    const userRole = req.user.role;
+    let subjectTeacher;
+
+    const currentSubject = await Subject.findById(currentSubjectId);
+    if (!currentSubject) {
+      throw new NotFoundError("Current subject not found.");
+    }
+
+    if (userRole === "teacher") {
+      const isSubjectTeacher = currentSubject.subjectTeachers.some(
+        (teacher) => teacher.toString() === userId.toString(),
+      );
+
+      if (!isSubjectTeacher) {
+        throw new BadRequestError(
+          "You are not the subject teacher for this subject.",
+        );
+      }
+      subjectTeacher = userId;
+    } else if (userRole === "admin" || userRole === "proprietor") {
+      if (!req.body.subjectTeacher) {
+        throw new BadRequestError(
+          "subjectTeacher must be provided for admin or proprietor.",
+        );
+      }
+      subjectTeacher = req.body.subjectTeacher;
+    }
+
+    // Block if a diary with the same criteria already exists in the current session
+    const duplicate = await Diary.findOne({
+      term: currentTerm,
+      lessonWeek: currentWeek,
+    });
+
+    if (duplicate) {
+      throw new BadRequestError(
+        `A diary for class "${className}", subject "${subjectName}", term "${currentTerm}", week ${currentWeek} already exists in the current session.`,
+      );
+    }
+
+    const newDiary = new Diary({
+      subjectTeacher,
+      classId: currentSubject.classId,
+      subject: currentSubject._id,
+      term: currentTerm,
+      lessonWeek: currentWeek,
+      topic: sourceDiary.topic,
+      subTopics: sourceDiary.subTopics,
+      session: currentSession,
+      approved: false,
+    });
+
+    await newDiary.save();
+
+    res.status(StatusCodes.CREATED).json({
+      message: `Diary copied from session ${sourceDiary.session} to ${currentSession} ${currentTerm} term.`,
+      diary: newDiary,
+    });
+  } catch (error) {
+    console.error("Error copying diary to current session:", error);
+    next(new InternalServerError(error.message));
   }
 };

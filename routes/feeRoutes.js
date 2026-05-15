@@ -15,7 +15,7 @@ router.post(
   authorizeRole("admin", "proprietor"),
   checkStatus,
   feeController.createFee,
-);
+);  
 router.get(
   "/",
   authenticateToken,

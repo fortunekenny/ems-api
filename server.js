@@ -85,6 +85,7 @@ start();
 */
 
 import express from "express";
+import { createServer } from "http";
 import dotenv from "dotenv";
 import "express-async-errors";
 import morgan from "morgan";
@@ -99,11 +100,13 @@ import connectDB from "./db/connectdb.js";
 import notFoundMiddleware from "./middleware/not-found.js";
 import errorHandlerMiddleware from "./middleware/error-handler.js";
 import loadRoutes from "./utils/routeLoader.js"; // Import dynamic route loader
+import { initSocket } from "./utils/socket.js";
 
 import authRoutes from "./routes/authRoutes.js";
 
 // Initialize express
 const app = express();
+const httpServer = createServer(app);
 
 // Load environment variables
 dotenv.config();
@@ -153,7 +156,8 @@ const port = process.env.PORT || 5100;
 const start = async () => {
   try {
     await connectDB(process.env.MONGO_URL);
-    app.listen(port, () => {
+    initSocket(httpServer);
+    httpServer.listen(port, () => {
       console.log(`ems server is listening on port ${port}...`);
     });
   } catch (error) {

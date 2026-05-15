@@ -49,6 +49,14 @@ router.get(
   reportCardController.getReportCardById,
 );
 
+// Download a report card PDF
+router.get(
+  "/:id/download",
+  authenticateToken,
+  authorizeRole("admin", "proprietor", "teacher", "student", "parent"),
+  reportCardController.downloadStudentReportCard,
+);
+
 // Update a report card
 router.patch(
   "/:id",

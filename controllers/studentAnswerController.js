@@ -940,6 +940,9 @@ export const deleteStudentAnswer = async (req, res, next) => {
     );
     await evaluation.save();
 
+    // Track response metadata
+    let gradeAction = "No grade affected";
+
     // Clean up Grade data if this is an Exam or Test
     if (evaluationType === "Exam" || evaluationType === "Test") {
       const gradeData = await Grade.findOne({
@@ -951,22 +954,9 @@ export const deleteStudentAnswer = async (req, res, next) => {
       });
 
       if (gradeData) {
-        if (evaluationType === "Exam") {
-          gradeData.exam = null;
-          gradeData.examScore = 0;
-        } else if (evaluationType === "Test") {
-          // Remove this test from the tests array
-          gradeData.tests = gradeData.tests.filter(
-            (testId) => testId.toString() !== evaluationTypeId.toString(),
-          );
-          // Recalculate testsScore
-          gradeData.testsScore = gradeData.tests.reduce(
-            (sum, testId) =>
-              sum + (gradeData.testsScore?.[testId.toString()] || 0),
-            0,
-          );
-        }
-        await gradeData.save();
+        // console.log("Deleting grade");
+        await Grade.findByIdAndDelete(gradeData._id);
+        gradeAction = "Grade deleted";
       }
     }
 
@@ -975,125 +965,442 @@ export const deleteStudentAnswer = async (req, res, next) => {
 
     res
       .status(StatusCodes.OK)
-      .json({ message: "Student answer deleted successfully." });
+      .json({
+        message: "Student answer deleted successfully.",
+        gradeAction
+      });
   } catch (error) {
-    console.error("Error deleting student answer:", error);
+    console.log("Error deleting student answer:", error);
     next(new BadRequestError(error.message));
   }
 };
 
+
 export const downloadStudentAnswers = async (req, res, next) => {
   try {
-    const { id } = req.params; // StudentAnswer ID
+    const { id } = req.params;
 
-    // Fetch the StudentAnswer from the database
     const studentAnswer = await StudentAnswer.findById(id).populate([
       { path: "answers.questionId", select: "questionText" },
       { path: "classId", select: "className" },
       { path: "subject", select: "subjectName" },
       { path: "student", select: "_id firstName middleName lastName" },
-      // { path: "student", select: "name" },
     ]);
 
     if (!studentAnswer) {
       return next(new Error("Student answer not found."));
     }
 
-    // Create a new PDF document
-    const doc = new PDFDocument();
+    const doc = new PDFDocument({ margin: 50 });
 
-    // Set response headers for PDF download
-    const fileName = `${studentAnswer.student.firstName.replace(
-      /[^a-zA-Z0-9]/g,
-      "_",
-    )}_${studentAnswer.student.lastName.replace(
-      /[^a-zA-Z0-9]/g,
-      "_",
-    )}_${studentAnswer.subject.subjectName.replace(/[^a-zA-Z0-9]/g, "_")}_${
-      studentAnswer.evaluationType
-    }${
-      studentAnswer.evaluationType === "Assignment" ||
-      studentAnswer.evaluationType === "ClassWork"
-        ? `_Week_${studentAnswer.lessonWeek}`
-        : ""
-    }.pdf`;
+    const fileName = `${studentAnswer.student.firstName}_${studentAnswer.student.lastName}_${studentAnswer.subject.subjectName}_${studentAnswer.evaluationType}.pdf`;
 
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
 
-    // Pipe the PDF to the response
     doc.pipe(res);
 
-    // Add content to the PDF
-    doc
-      .fontSize(20)
-      .text(
-        `${studentAnswer.student.firstName} ${
-          studentAnswer.student.lastName
-        }'s ${studentAnswer.subject.subjectName} ${
-          studentAnswer.evaluationType
-        }${
-          studentAnswer.evaluationType === "Assignment" ||
-          studentAnswer.evaluationType === "Classwork"
-            ? ` Week_${studentAnswer.lessonWeek}`
-            : ""
-        }`,
-        { align: "center" },
-      )
-      .moveDown();
+    // Color palette
+    const colors = {
+      primary: "#2563eb",
+      secondary: "#1e40af",
+      success: "#16a34a",
+      danger: "#dc2626",
+      text: "#1f2937",
+      textLight: "#6b7280",
+      border: "#e5e7eb",
+      cardBg: "#f9fafb",
+      accent: "#8b5cf6"
+    };
 
-    doc
-      .fontSize(15)
-      .text(
-        `Student Name: ${studentAnswer.student.firstName} ${studentAnswer.student.middleName} ${studentAnswer.student.lastName}`,
-      );
-    doc.text(`Class: ${studentAnswer.classId.className}`);
-    doc.text(`Subject: ${studentAnswer.subject.subjectName}`);
-    doc.text(`Evaluation Type: ${studentAnswer.evaluationType}`);
-    doc.text(
-      `${
-        studentAnswer.evaluationType === "Assignment" ||
-        studentAnswer.evaluationType === "Classwork"
-          ? `Week: ${studentAnswer.lessonWeek}`
-          : ""
-      }`,
-    );
+    // Utility — Modern section header
+    const sectionHeader = (title) => {
+      doc.moveDown(0.8);
 
-    doc.moveDown();
+      const headerY = doc.y;
 
-    doc.text("Questions And Answers:", { underline: true });
-    studentAnswer.answers.forEach((answer, index) => {
-      const {
-        questionId,
-        answer: studentAnswerText,
-        files,
-        isCorrect,
-        marksAwarded,
-      } = answer;
-
-      doc.moveDown();
+      // Background bar
       doc
-        // .font("system-ui")
-        .text(`Question ${index + 1}: ${questionId.questionText}`);
-      doc.text(
-        `Student Answer: ${studentAnswerText || "N/A"} || ${
-          isCorrect ? "Correct" : "Incorrect"
-        }`,
-      );
-      // doc.text(`${isCorrect ? "Correct ✔" : "Wrong ✖"}`);
-      doc.text(`Marks: ${marksAwarded}`);
-      if (files.length > 0) {
-        doc.text("Files:");
-        files.forEach((file, fileIndex) => {
-          doc.text(`  ${fileIndex + 1}. ${file.url}`);
+        .rect(40, headerY, 520, 28)
+        .fillAndStroke(colors.primary, colors.secondary);
+
+      // Title text
+      doc
+        .fillColor("#ffffff")
+        .font("Helvetica-Bold")
+        .fontSize(13)
+        .text(title, 55, headerY + 8);
+
+      doc.y = headerY + 28;
+      doc.moveDown(1);
+    };
+
+    // Utility — Info box
+    const infoBox = (label, value) => {
+      const startY = doc.y;
+
+      doc
+        .font("Helvetica-Bold")
+        .fontSize(10)
+        .fillColor(colors.textLight)
+        .text(`${label}:`, { continued: true });
+
+      doc
+        .font("Helvetica")
+        .fontSize(10)
+        .fillColor(colors.text)
+        .text(` ${value}`);
+
+      doc.moveDown(0.3);
+    };
+
+    // HEADER WITH SCHOOL BRANDING
+    // Top accent bar
+    doc
+      .rect(0, 0, 612, 8)
+      .fillAndStroke(colors.primary, colors.secondary);
+
+    doc.y = 30;
+
+    // School name
+    doc
+      .font("Helvetica-Bold")
+      .fontSize(24)
+      .fillColor(colors.primary)
+      .text("SHEPHERD NURSERY & PRIMARY SCHOOL", { align: "center" });
+
+    doc.moveDown(0.4);
+
+    doc
+      .font("Helvetica-Oblique")
+      .fontSize(10)
+      .fillColor(colors.textLight)
+      .text("Student Evaluation Report", { align: "center" });
+
+    doc.moveDown(0.8);
+
+    // Decorative divider
+    const dividerY = doc.y;
+    doc
+      .moveTo(150, dividerY)
+      .lineTo(462, dividerY)
+      .strokeColor(colors.primary)
+      .lineWidth(2)
+      .stroke();
+
+    doc.circle(150, dividerY, 4).fillAndStroke(colors.accent, colors.accent);
+    doc.circle(462, dividerY, 4).fillAndStroke(colors.accent, colors.accent);
+
+    doc.moveDown(1.5);
+
+    // STUDENT INFO CARD
+    const cardY = doc.y;
+    const cardHeight = 110;
+
+    // Shadow
+    doc
+      .rect(53, cardY + 3, 506, cardHeight)
+      .fillOpacity(0.1)
+      .fill("#000000")
+      .fillOpacity(1);
+
+    // Main card
+    doc
+      .roundedRect(50, cardY, 506, cardHeight, 8)
+      .fillAndStroke(colors.cardBg, colors.border);
+
+    doc.y = cardY + 10;
+
+    sectionHeader("Student Information");
+
+    infoBox(
+      "Name",
+      `${studentAnswer.student.firstName} ${studentAnswer.student.lastName}`
+    );
+    infoBox("Class", studentAnswer.classId.className);
+    infoBox("Subject", studentAnswer.subject.subjectName);
+
+    doc.y = cardY + cardHeight + 15;
+
+    // EVALUATION DETAILS CARD
+    const evalCardY = doc.y;
+    const evalHeight = studentAnswer.lessonWeek ? 140 : 125;
+
+    // Shadow
+    doc
+      .rect(53, evalCardY + 3, 506, evalHeight)
+      .fillOpacity(0.1)
+      .fill("#000000")
+      .fillOpacity(1);
+
+    // Main card
+    doc
+      .roundedRect(50, evalCardY, 506, evalHeight, 8)
+      .fillAndStroke(colors.cardBg, colors.border);
+
+    doc.y = evalCardY + 10;
+
+    sectionHeader("Evaluation Details");
+
+    infoBox("Type", studentAnswer.evaluationType);
+    if (studentAnswer.lessonWeek) {
+      infoBox("Week", `Week ${studentAnswer.lessonWeek}`);
+    }
+    infoBox("Term", studentAnswer.term || "N/A");
+    infoBox("Session", studentAnswer.session || "N/A");
+
+    doc.y = evalCardY + evalHeight + 20;
+
+    // QUESTIONS SECTION
+    sectionHeader("Questions & Answers");
+
+    studentAnswer.answers.forEach((answer, index) => {
+      const { questionId, answer: studentAnswerText, files, isCorrect, marksAwarded } = answer;
+
+      // Page guard
+      if (doc.y > 650) {
+        doc.addPage();
+        doc.y = 50;
+      }
+
+      const qCardY = doc.y;
+      const qCardX = 50;
+      const qCardWidth = 506;
+      const contentX = qCardX + 60;
+      const contentWidth = qCardWidth - 70;
+
+      // Question number badge
+      doc
+        .roundedRect(qCardX, qCardY, 35, 35, 5)
+        .fillAndStroke(colors.primary, colors.secondary);
+
+      doc
+        .font("Helvetica-Bold")
+        .fontSize(16)
+        .fillColor("#ffffff")
+        .text(`${index + 1}`, qCardX, qCardY + 10, {
+          width: 35,
+          align: "center"
+        });
+
+      // Calculate heights for proper card sizing
+      let contentY = qCardY + 15;
+
+      const questionText = questionId?.questionText || "Question text unavailable";
+      const questionHeight = doc.heightOfString(questionText, { width: contentWidth });
+
+      const answerText = studentAnswerText || (files?.length ? "[File Upload]" : "N/A");
+      const answerHeight = doc.heightOfString(answerText, { width: contentWidth - 10 });
+
+      const filesHeight = files?.length > 0 ? 20 + (files.length * 15) : 0;
+
+      const totalCardHeight = questionHeight + answerHeight + filesHeight + 90;
+
+      // Question card shadow
+      doc
+        .roundedRect(qCardX + 43, qCardY + 3, qCardWidth - 40, totalCardHeight, 8)
+        .fillOpacity(0.08)
+        .fill("#000000")
+        .fillOpacity(1);
+
+      // Question card background
+      doc
+        .roundedRect(qCardX + 45, qCardY, qCardWidth - 40, totalCardHeight, 8)
+        .fillAndStroke("#ffffff", colors.border);
+
+      // Question text
+      doc.y = contentY;
+      doc
+        .font("Helvetica-Bold")
+        .fontSize(11)
+        .fillColor(colors.text)
+        .text(questionText, contentX, doc.y, { width: contentWidth });
+
+      doc.moveDown(0.6);
+
+      // Answer section with background
+      const answerBoxY = doc.y;
+      doc
+        .rect(contentX - 5, answerBoxY - 5, contentWidth + 10, answerHeight + 25)
+        .fillOpacity(0.5)
+        .fill(colors.cardBg)
+        .fillOpacity(1);
+
+      doc.y = answerBoxY;
+      doc
+        .font("Helvetica-Bold")
+        .fontSize(10)
+        .fillColor(colors.primary)
+        .text("Answer:", contentX, doc.y, { continued: false });
+
+      doc.y += 12;
+      doc
+        .font("Helvetica")
+        .fontSize(10)
+        .fillColor(colors.text)
+        .text(answerText, contentX, doc.y, { width: contentWidth });
+
+      doc.moveDown(0.6);
+
+      // Status and marks section
+      const statusY = doc.y;
+      const badgeWidth = 85;
+      const badgeColor = isCorrect ? colors.success : colors.danger;
+
+      doc
+        .roundedRect(contentX, statusY, badgeWidth, 20, 4)
+        .fillAndStroke(badgeColor, badgeColor);
+
+      doc
+        .font("Helvetica-Bold")
+        .fontSize(9)
+        .fillColor("#ffffff")
+        .text(isCorrect ? "CORRECT" : "INCORRECT", contentX, statusY + 6, {
+          width: badgeWidth,
+          align: "center"
+        });
+
+      doc
+        .font("Helvetica-Bold")
+        .fontSize(10)
+        .fillColor(colors.text)
+        .text(`Marks: ${marksAwarded ?? "N/A"}`, contentX + badgeWidth + 15, statusY + 5);
+
+      // Files section
+      if (files?.length > 0) {
+        doc.y = statusY + 30;
+        doc
+          .font("Helvetica-Bold")
+          .fontSize(9)
+          .fillColor(colors.textLight)
+          .text("Attachments:", contentX, doc.y);
+
+        doc.moveDown(0.3);
+        files.forEach((file, i) => {
+          doc
+            .font("Helvetica")
+            .fontSize(9)
+            .fillColor(colors.primary)
+            .text(`File ${i + 1}`, contentX + 10, doc.y, {
+              link: file.url,
+              underline: true,
+            });
+          doc.moveDown(0.2);
         });
       }
+
+      doc.y = qCardY + totalCardHeight + 15;
     });
 
-    // Finalize the PDF and end the stream
+    // SUMMARY CARD
+    if (doc.y > 680) doc.addPage();
+
+    doc.moveDown(1);
+
+    const summaryY = doc.y;
+    const summaryHeight = 120;
+
+    // Summary card shadow
+    doc
+      .roundedRect(53, summaryY + 3, 506, summaryHeight, 8)
+      .fillOpacity(0.1)
+      .fill("#000000")
+      .fillOpacity(1);
+
+    // Summary card
+    doc
+      .roundedRect(50, summaryY, 506, summaryHeight, 8)
+      .fillAndStroke("#f0f9ff", colors.border);
+
+    doc
+      .rect(50, summaryY, 10, summaryHeight)
+      .fill(colors.accent);
+
+    doc.y = summaryY + 10;
+
+    sectionHeader("Performance Summary");
+
+    // Content area - center aligned
+    const contentStartY = summaryY + 60;
+
+    // Marks display - left side
+    doc
+      .font("Helvetica-Bold")
+      .fontSize(12)
+      .fillColor(colors.textLight)
+      .text("Total Marks Obtained", 80, contentStartY);
+
+    doc
+      .font("Helvetica-Bold")
+      .fontSize(32)
+      .fillColor(colors.primary)
+      .text(studentAnswer.markObtained || 0, 80, contentStartY + 20);
+
+    // Vertical divider
+    doc
+      .moveTo(280, contentStartY - 5)
+      .lineTo(280, contentStartY + 55)
+      .strokeColor(colors.border)
+      .lineWidth(2)
+      .stroke();
+
+    // Grade display - right side
+    doc
+      .font("Helvetica-Bold")
+      .fontSize(12)
+      .fillColor(colors.textLight)
+      .text("Grade Achieved", 320, contentStartY);
+
+    // Grade badge
+    doc
+      .roundedRect(320, contentStartY + 18, 140, 38, 6)
+      .fillAndStroke(colors.accent, colors.accent);
+
+    doc
+      .font("Helvetica-Bold")
+      .fontSize(22)
+      .fillColor("#ffffff")
+      .text(studentAnswer.grade || "N/A", 320, contentStartY + 26, {
+        width: 140,
+        align: "center"
+      });
+
+    doc.y = summaryY + summaryHeight + 20;
+
+    // FOOTER
+    doc.moveDown(1);
+
+    doc
+      .moveTo(50, doc.y)
+      .lineTo(556, doc.y)
+      .strokeColor(colors.border)
+      .lineWidth(1)
+      .stroke();
+
+    doc.moveDown(0.5);
+
+    doc
+      .font("Helvetica-Oblique")
+      .fontSize(9)
+      .fillColor(colors.textLight)
+      .text(
+        `Generated on ${new Date().toLocaleString("en-US", {
+          dateStyle: "long",
+          timeStyle: "short"
+        })}`,
+        { align: "center" }
+      );
+
+    // Bottom accent bar
+    const pageHeight = doc.page.height;
+    doc
+      .rect(0, pageHeight - 8, 612, 8)
+      .fillAndStroke(colors.primary, colors.secondary);
+
     doc.end();
-  } catch (error) {
-    console.error("Error generating PDF:", error);
+
+  } catch (err) {
+    console.log("PDF generation failed:", err);
     next(new Error("Failed to generate PDF."));
   }
 };
