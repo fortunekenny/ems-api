@@ -1408,7 +1408,7 @@ export const deleteAssignment = async (req, res, next) => {
       }),
     ];
 
-    /*  await sendBulkNotifications({
+    await sendBulkNotifications({
       sender: req.user.userId,
       title: "Assignment Deleted",
       message: notificationMessage,
@@ -1417,7 +1417,7 @@ export const deleteAssignment = async (req, res, next) => {
         broadcastId: new mongoose.Types.ObjectId(),
         lessonNoteId: lessonNoteDoc._id,
       },
-    }); */
+    });
 
     // Delete the Assignment document
     await Assignment.findByIdAndDelete(id);

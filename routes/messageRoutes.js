@@ -32,6 +32,16 @@ const auth = [
 ];
 
 // ─── Conversations ────────────────────────────────────────────────────────────
+/* 
+POST   /api/v1/message/conversations
+GET    /api/v1/message/conversations
+GET    /api/v1/message/conversations/:conversationId
+POST   /api/v1/message/conversations/:conversationId/participants
+DELETE /api/v1/message/conversations/:conversationId/participants/:participantId
+DELETE /api/v1/message/conversations/:conversationId/leave
+
+*/
+
 router.post("/conversations", ...auth, createConversation);
 router.get("/conversations", ...auth, getConversations);
 router.get("/conversations/:conversationId", ...auth, getConversationById);
@@ -52,6 +62,21 @@ router.delete(
 );
 
 // ─── Messages ────────────────────────────────────────────────────────────────
+
+/* 
+POST   /api/v1/message/conversations/:conversationId/messages
+GET    /api/v1/message/conversations/:conversationId/messages?page=1&limit=20
+PATCH  /api/v1/message/conversations/:conversationId/read
+GET    /api/v1/message/conversations/:conversationId/search?q=keyword
+PATCH  /api/v1/message/messages/:messageId
+DELETE /api/v1/message/messages/:messageId
+POST   /api/v1/message/messages/:messageId/reactions
+DELETE /api/v1/message/messages/:messageId/reactions
+POST   /api/v1/message/messages/:messageId/forward
+POST   /api/v1/message/messages/broadcast   (admin/teacher/proprietor only)
+
+*/
+
 router.post("/conversations/:conversationId/messages", ...auth, sendMessage);
 router.get("/conversations/:conversationId/messages", ...auth, getMessages);
 router.patch("/conversations/:conversationId/read", ...auth, markAsRead);

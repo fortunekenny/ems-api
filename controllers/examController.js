@@ -10,6 +10,7 @@ import StudentAnswer from "../models/StudentAnswerModel.js"; // Adjust the path 
 import BadRequestError from "../errors/bad-request.js";
 import NotFoundError from "../errors/not-found.js";
 import InternalServerError from "../errors/internal-server-error.js";
+import { notifyExamScheduled } from "../utils/notificationService.js";
 // import { lineTo } from "pdfkit/js/mixins/vector";
 import {
   getCurrentTermDetails,
@@ -207,6 +208,14 @@ export const createExam = async (req, res, next) => {
       { path: "subject", select: "_id subjectName" },
       { path: "subjectTeacher", select: "_id name" },
     ]);
+
+    await notifyExamScheduled({
+      exam,
+      subjectName: populatedExam.subject?.subjectName || "your subject",
+      className: populatedExam.classId?.className || "your class",
+      students,
+      senderId: req.user?.userId || req.user?.id,
+    });
 
     res.status(StatusCodes.CREATED).json({
       message: "Exam created successfully.",

@@ -7,8 +7,12 @@ import BadRequestError from "../errors/bad-request.js";
 import NotFoundError from "../errors/not-found.js";
 import { StatusCodes } from "http-status-codes";
 import InternalServerError from "../errors/internal-server-error.js";
-import { createNotificationForClasswork } from "./notificationController.js";
+import {
+  createNotificationForClasswork,
+  sendBulkNotifications,
+} from "./notificationController.js";
 import Subject from "../models/SubjectModel.js";
+import mongoose from "mongoose";
 
 // Create ClassWork
 
@@ -849,7 +853,7 @@ export const deleteClassWork = async (req, res, next) => {
       }),
     ];
 
-    /*     await sendBulkNotifications({
+    await sendBulkNotifications({
       sender: req.user.userId,
       title: "Class Work Deleted",
       message: notificationMessage,
@@ -857,7 +861,7 @@ export const deleteClassWork = async (req, res, next) => {
       metadata: {
         broadcastId: new mongoose.Types.ObjectId(),
       },
-    }); */
+    });
 
     // Delete the ClassWork document
     await ClassWork.findByIdAndDelete(id);

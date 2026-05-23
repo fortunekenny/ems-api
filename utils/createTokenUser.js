@@ -61,7 +61,7 @@ const createTokenUser = (user) => {
   if (user.father || user.mother || user.singleParent) {
     let roleData;
     let subRole;
-    let parentId = user.parentId; // top-level Parent _id
+    let parentId = user._id || user.parentId; // top-level Parent _id
 
     if (user.father) {
       roleData = user.father;

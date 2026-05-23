@@ -8,6 +8,7 @@ import Exam from "../models/ExamModel.js";
 import Staff from "../models/StaffModel.js";
 import InternalServerError from "../errors/internal-server-error.js";
 import PDFDocument from "pdfkit";
+import { notifyGradePublished } from "../utils/notificationService.js";
 
 // Create a grade
 export const createGrade = async (req, res, next) => {
@@ -245,6 +246,13 @@ export const createGrade = async (req, res, next) => {
       { path: "student", select: "_id firstName middleName lastName" },
       { path: "teacher", select: "_id name" },
     ]);
+
+    await notifyGradePublished({
+      grade: newGrade,
+      studentId: student,
+      subjectName: populatedGrade.subject?.subjectName || "your subject",
+      senderId: req.user.id || req.user.userId,
+    });
 
     res.status(StatusCodes.CREATED).json({
       message: "Graded successfully",

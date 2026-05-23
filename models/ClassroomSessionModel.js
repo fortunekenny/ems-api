@@ -1,12 +1,38 @@
 import mongoose from "mongoose";
 
-const slideSchema = new mongoose.Schema(
+const mediaItemSchema = new mongoose.Schema(
   {
     url: { type: String, required: true },
     fileName: { type: String, required: true },
+    type: {
+      type: String,
+      required: true,
+      enum: ["slide", "image", "pdf", "video", "audio"],
+    },
     order: { type: Number, required: true },
   },
   { _id: false },
+);
+
+const strokeSchema = new mongoose.Schema(
+  {
+    tool: {
+      type: String,
+      enum: ["pen", "highlighter", "eraser"],
+      default: "pen",
+    },
+    color: { type: String, default: "#000000" },
+    size: { type: Number, default: 3 },
+    points: [
+      {
+        _id: false,
+        x: { type: Number, required: true },
+        y: { type: Number, required: true },
+      },
+    ],
+    drawnAt: { type: Date, default: Date.now },
+  },
+  { _id: true },
 );
 
 const questionSchema = new mongoose.Schema(
@@ -55,8 +81,9 @@ const classroomSessionSchema = new mongoose.Schema(
     },
     startedAt: { type: Date, default: null },
     endedAt: { type: Date, default: null },
-    slides: [slideSchema],
-    currentSlide: { type: Number, default: 0 },
+    media: [mediaItemSchema],
+    currentMediaIndex: { type: Number, default: 0 },
+    boardStrokes: [strokeSchema],
     questions: [questionSchema],
     recordingUrl: { type: String, default: null },
   },

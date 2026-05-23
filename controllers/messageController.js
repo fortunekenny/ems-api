@@ -5,6 +5,7 @@ import { StatusCodes } from "http-status-codes";
 import BadRequestError from "../errors/bad-request.js";
 import NotFoundError from "../errors/not-found.js";
 import InternalServerError from "../errors/internal-server-error.js";
+import { notifyNewMessage } from "../utils/notificationService.js";
 
 // Maps req.user.role to the Mongoose model name
 const resolveParticipantModel = (role) => {
@@ -71,6 +72,7 @@ export const createConversation = async (req, res, next) => {
 
     res.status(StatusCodes.CREATED).json(conversation);
   } catch (error) {
+    console.error("Error creating conversation:", error);
     next(new InternalServerError(error.message));
   }
 };
@@ -88,6 +90,7 @@ export const getConversations = async (req, res, next) => {
 
     res.status(StatusCodes.OK).json(conversations);
   } catch (error) {
+    console.error("Error fetching conversations:", error);
     next(new InternalServerError(error.message));
   }
 };
@@ -107,6 +110,7 @@ export const getConversationById = async (req, res, next) => {
 
     res.status(StatusCodes.OK).json(conversation);
   } catch (error) {
+    console.error("Error fetching conversation:", error);
     next(new InternalServerError(error.message));
   }
 };
@@ -142,6 +146,7 @@ export const addParticipant = async (req, res, next) => {
 
     res.status(StatusCodes.OK).json(conversation);
   } catch (error) {
+    console.error("Error adding participant:", error);
     next(new InternalServerError(error.message));
   }
 };
@@ -174,6 +179,7 @@ export const removeParticipant = async (req, res, next) => {
 
     res.status(StatusCodes.OK).json(conversation);
   } catch (error) {
+    console.error("Error removing participant:", error);
     next(new InternalServerError(error.message));
   }
 };
@@ -211,6 +217,7 @@ export const leaveConversation = async (req, res, next) => {
 
     res.status(StatusCodes.OK).json({ message: "Left conversation." });
   } catch (error) {
+    console.error("Error leaving conversation:", error);
     next(new InternalServerError(error.message));
   }
 };
@@ -251,8 +258,17 @@ export const sendMessage = async (req, res, next) => {
     // Broadcast to everyone in the conversation room
     getIO().to(conversationId).emit("new_message", message);
 
+    // Notify participants who are not in the conversation room (personal socket rooms)
+    notifyNewMessage({
+      conversationId,
+      message,
+      participants: conversation.participants,
+      senderId: userId,
+    });
+
     res.status(StatusCodes.CREATED).json(message);
   } catch (error) {
+    console.error("Error sending message:", error);
     next(new InternalServerError(error.message));
   }
 };
@@ -292,6 +308,7 @@ export const getMessages = async (req, res, next) => {
       messages,
     });
   } catch (error) {
+    console.error("Error fetching messages:", error);
     next(new InternalServerError(error.message));
   }
 };
@@ -327,6 +344,7 @@ export const markAsRead = async (req, res, next) => {
 
     res.status(StatusCodes.OK).json({ message: "Messages marked as read." });
   } catch (error) {
+    console.error("Error marking messages as read:", error);
     next(new InternalServerError(error.message));
   }
 };
@@ -356,6 +374,7 @@ export const editMessage = async (req, res, next) => {
 
     res.status(StatusCodes.OK).json(message);
   } catch (error) {
+    console.error("Error editing message:", error);
     next(new InternalServerError(error.message));
   }
 };
@@ -383,15 +402,14 @@ export const deleteMessage = async (req, res, next) => {
     message.attachments = [];
     await message.save();
 
-    getIO()
-      .to(message.conversation.toString())
-      .emit("message_deleted", {
-        messageId,
-        conversationId: message.conversation,
-      });
+    getIO().to(message.conversation.toString()).emit("message_deleted", {
+      messageId,
+      conversationId: message.conversation,
+    });
 
     res.status(StatusCodes.OK).json({ message: "Message deleted." });
   } catch (error) {
+    console.error("Error deleting message:", error);
     next(new InternalServerError(error.message));
   }
 };
@@ -425,6 +443,7 @@ export const addReaction = async (req, res, next) => {
 
     res.status(StatusCodes.OK).json(message);
   } catch (error) {
+    console.error("Error adding reaction:", error);
     next(new InternalServerError(error.message));
   }
 };
@@ -449,6 +468,7 @@ export const removeReaction = async (req, res, next) => {
 
     res.status(StatusCodes.OK).json(message);
   } catch (error) {
+    console.error("Error removing reaction:", error);
     next(new InternalServerError(error.message));
   }
 };
@@ -487,8 +507,16 @@ export const forwardMessage = async (req, res, next) => {
 
     getIO().to(conversationId).emit("new_message", forwarded);
 
+    notifyNewMessage({
+      conversationId,
+      message: forwarded,
+      participants: conversation.participants,
+      senderId: userId,
+    });
+
     res.status(StatusCodes.CREATED).json(forwarded);
   } catch (error) {
+    console.error("Error forwarding message:", error);
     next(new InternalServerError(error.message));
   }
 };
@@ -567,6 +595,7 @@ export const broadcastMessage = async (req, res, next) => {
       failed,
     });
   } catch (error) {
+    console.error("Error broadcasting message:", error);
     next(new InternalServerError(error.message));
   }
 };
@@ -594,6 +623,7 @@ export const searchMessages = async (req, res, next) => {
 
     res.status(StatusCodes.OK).json(messages);
   } catch (error) {
+    console.error("Error searching messages:", error);
     next(new InternalServerError(error.message));
   }
 };

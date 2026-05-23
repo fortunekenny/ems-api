@@ -10,6 +10,10 @@ import Student from "../models/StudentModel.js";
 import Subject from "../models/SubjectModel.js"; // Import the Subject model
 import calculateAge from "../utils/ageCalculate.js";
 import {
+  notifyStaffStatusChanged,
+  notifyStaffVerification,
+} from "../utils/notificationService.js";
+import {
   getCurrentTermDetails,
   holidayDurationForEachTerm,
   startTermGenerationDate,
@@ -758,6 +762,12 @@ export const updateStaffStatus = async (req, res, next) => {
     staff.status = status;
     await staff.save();
 
+    await notifyStaffStatusChanged({
+      staff,
+      newStatus: status,
+      senderId: req.user?.userId || req.user?.id,
+    });
+
     res.status(StatusCodes.OK).json({
       message: `Staff status updated to '${status}'.`,
       staff,
@@ -798,6 +808,12 @@ export const updateStaffVerification = async (req, res, next) => {
 
     staff.isVerified = isVerified;
     await staff.save();
+
+    await notifyStaffVerification({
+      staff,
+      isVerified,
+      senderId: req.user?.userId || req.user?.id,
+    });
 
     res.status(StatusCodes.OK).json({
       message: `Staff verification status updated to '${isVerified}'`,

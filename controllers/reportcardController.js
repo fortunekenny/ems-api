@@ -8,6 +8,7 @@ import ReportCard from "../models/ReportcardModel.js";
 import Staff from "../models/StaffModel.js";
 import Student from "../models/StudentModel.js";
 import PDFDocument from "pdfkit";
+import { notifyReportCardReady } from "../utils/notificationService.js";
 import {
   getCurrentTermDetails, // Ensure this is correctly defined
   holidayDurationForEachTerm,
@@ -300,6 +301,16 @@ export const createReportCard = async (req, res, next) => {
       { path: "student", select: "_id firstName middleName lastName" },
       { path: "teacher", select: "_id firstName lastName" },
     ]);
+
+    await notifyReportCardReady({
+      reportCard,
+      studentId: student,
+      className: classData.className,
+      term,
+      session,
+      senderId: req.user.id || req.user.userId,
+    });
+
     res.status(StatusCodes.CREATED).json({
       message: "Report card created successfully",
       populatedReportCard,
@@ -590,6 +601,21 @@ export const createReportCardsForClass = async (req, res, next) => {
       })
       .populate({ path: "classId", select: "_id className" })
       .populate({ path: "teacher", select: "_id firstName lastName" });
+
+    // Notify each student (and their parents) that their report card is ready
+    const senderId = req.user.id || req.user.userId;
+    await Promise.all(
+      createdReportCards.map((rc) =>
+        notifyReportCardReady({
+          reportCard: rc,
+          studentId: rc.student,
+          className: classData.className,
+          term,
+          session,
+          senderId,
+        }),
+      ),
+    );
 
     res.status(StatusCodes.CREATED).json({
       message: "Report cards created successfully",

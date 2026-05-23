@@ -10,6 +10,7 @@ import StudentAnswer from "../models/StudentAnswerModel.js"; // Adjust the path 
 import BadRequestError from "../errors/bad-request.js";
 import NotFoundError from "../errors/not-found.js";
 import InternalServerError from "../errors/internal-server-error.js";
+import { notifyTestScheduled } from "../utils/notificationService.js";
 import {
   getCurrentTermDetails,
   startTermGenerationDate,
@@ -235,6 +236,14 @@ export const createTest = async (req, res, next) => {
       { path: "subject", select: "_id subjectName" },
       { path: "subjectTeacher", select: "_id name" },
     ]);
+
+    await notifyTestScheduled({
+      test,
+      subjectName: populatedTest.subject?.subjectName || "your subject",
+      className: populatedTest.classId?.className || "your class",
+      students,
+      senderId: req.user?.userId || req.user?.id,
+    });
 
     res.status(StatusCodes.CREATED).json({
       message: "Test created successfully.",

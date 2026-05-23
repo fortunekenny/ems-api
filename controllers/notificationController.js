@@ -9,6 +9,7 @@ import Class from "../models/ClassModel.js";
 import Subject from "../models/SubjectModel.js";
 import BadRequestError from "../errors/bad-request.js";
 import mongoose from "mongoose";
+import { getIO } from "../utils/socket.js";
 
 // Create a notification
 export const createNotification = async (req, res, next) => {
@@ -531,7 +532,8 @@ export const sendBulkNotifications = async (options) => {
   // Bulk insert notifications
   const insertedNotifications = await Notification.insertMany(notifications);
 
-  // Push notification _id to each recipient's notifications array
+  // Push notification _id to each recipient's notifications array and emit real-time event
+  const io = getIO();
   for (let i = 0; i < recipients.length; i++) {
     const { recipientId, recipientModel } = recipients[i];
     const notificationId = insertedNotifications[i]._id;
@@ -542,6 +544,7 @@ export const sendBulkNotifications = async (options) => {
     } else if (recipientModel === "Parent") {
       await Parent.findByIdAndUpdate(recipientId, { $push: { notifications: notificationId } });
     }
+    io.to(recipientId.toString()).emit("new_notification", insertedNotifications[i]);
   }
 };
 

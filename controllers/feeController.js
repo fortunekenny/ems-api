@@ -7,6 +7,10 @@ import {
 } from "../utils/termGenerator.js";
 import InternalServerError from "../errors/internal-server-error.js";
 import NotFoundError from "../errors/not-found.js";
+import {
+  notifyFeeCreated,
+  notifyPaymentRecorded,
+} from "../utils/notificationService.js";
 
 // Create a new fee record
 export const createFee = async (req, res, next) => {
@@ -28,6 +32,13 @@ export const createFee = async (req, res, next) => {
         termDetails.term.charAt(0).toUpperCase() + termDetails.term.slice(1), // Capitalize
     });
     await fee.save();
+
+    await notifyFeeCreated({
+      fee,
+      studentId: student,
+      senderId: req.user?.userId || req.user?.id,
+    });
+
     res.status(StatusCodes.CREATED).json(fee);
   } catch (error) {
     console.log("Error creating fee record:", error);
@@ -78,6 +89,14 @@ export const recordInstallment = async (req, res, next) => {
     fee.amountPaid += amount;
 
     await fee.save();
+
+    await notifyPaymentRecorded({
+      fee,
+      studentId: fee.student,
+      amount,
+      senderId: req.user?.userId || req.user?.id,
+    });
+
     res.status(StatusCodes.OK).json(fee);
   } catch (error) {
     console.log("Error recording installment:", error);

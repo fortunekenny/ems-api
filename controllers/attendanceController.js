@@ -4,6 +4,7 @@ import InternalServerError from "../errors/internal-server-error.js";
 import NotFoundError from "../errors/not-found.js";
 import Attendance from "../models/AttendanceModel.js";
 import Student from "../models/StudentModel.js";
+import { notifyAttendanceAbsent } from "../utils/notificationService.js";
 import {
   getCurrentSession,
   getCurrentTermDetails,
@@ -99,6 +100,15 @@ export const markStudentAttendanceForMorning = async (req, res, next) => {
     // attendanceRecord.totalDaysPublicHoliday;
 
     await attendanceRecord.save();
+
+    if (morningStatus === "absent") {
+      await notifyAttendanceAbsent({
+        studentId: student._id,
+        studentName: `${student.firstName} ${student.lastName}`,
+        date: formattedToday,
+        senderId: req.user?.userId || req.user?.id,
+      });
+    }
 
     return res.status(StatusCodes.CREATED).json({
       message: "Attendance marked successfully.",

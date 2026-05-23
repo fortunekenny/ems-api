@@ -71,7 +71,9 @@ export const checkStatus = async (req, res, next) => {
     } else if (
       role === "teacher" ||
       role === "admin" ||
-      role === "non-teacher"
+      role === "non-teacher" ||
+      role === "proprietor" ||
+      role === "staff"
     ) {
       user = await Staff.findById(userId);
       if (user && user.status === "active") {
