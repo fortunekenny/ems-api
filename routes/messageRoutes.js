@@ -1,4 +1,6 @@
 import express from "express";
+import mongoose from "mongoose";
+import BadRequestError from "../errors/bad-request.js";
 import {
   createConversation,
   getConversations,
@@ -24,6 +26,25 @@ import {
 import { checkStatus } from "../utils/checkStatus.js";
 
 const router = express.Router();
+
+// Validate ObjectId params before hitting any controller
+router.param("conversationId", (req, res, next, id) => {
+  if (!mongoose.Types.ObjectId.isValid(id))
+    return next(new BadRequestError("Invalid conversationId."));
+  next();
+});
+
+router.param("messageId", (req, res, next, id) => {
+  if (!mongoose.Types.ObjectId.isValid(id))
+    return next(new BadRequestError("Invalid messageId."));
+  next();
+});
+
+router.param("participantId", (req, res, next, id) => {
+  if (!mongoose.Types.ObjectId.isValid(id))
+    return next(new BadRequestError("Invalid participantId."));
+  next();
+});
 
 const auth = [
   authenticateToken,
