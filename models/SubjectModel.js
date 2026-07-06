@@ -29,6 +29,7 @@ const subjectSchema = new mongoose.Schema({
   }, // e.g., 2023/2024
   term: {
     type: String,
+    lowercase: true,
     // default: function () {
     //   const { term } = getCurrentTermDetails(
     //     startTermGenerationDate,
@@ -36,7 +37,7 @@ const subjectSchema = new mongoose.Schema({
     //   );
     //   return term;
     // },
-  }, // e.g., First, Second, Third
+  }, // e.g., first, second, third
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now },
 });

@@ -57,7 +57,7 @@ const classWorkSchema = new mongoose.Schema({
     default: "pending",
   },
   session: { type: String }, // e.g., 2023/2024
-  term: { type: String }, // e.g., First, Second, Third
+  term: { type: String, lowercase: true }, // e.g., first, second, third
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now },
 });

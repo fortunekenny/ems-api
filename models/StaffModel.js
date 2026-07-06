@@ -51,7 +51,7 @@ const staffSchema = new mongoose.Schema({
   teacherRecords: [
     {
       session: { type: String, required: false }, // Academic session. Automated
-      term: { type: String, required: false }, // e.g., First, Second, Third term. Automated
+      term: { type: String, required: false, lowercase: true }, // e.g., first, second, third term. Automated
       isClassTeacher: { type: mongoose.Schema.Types.ObjectId, ref: "Class" }, // Reference to the class they are class teacher of. Input if a class teacher
       subjects: [{ type: mongoose.Schema.Types.ObjectId, ref: "Subject" }], // Subjects assigned to teachers. Automated if isClassTeacher is inputted and input if teacher is subjects teacher
       classes: [{ type: mongoose.Schema.Types.ObjectId, ref: "Class" }], // Classes assigned to teachers. Input if teacher is a subject teacher for more than 1 class

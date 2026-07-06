@@ -18,6 +18,15 @@ router.get(
   studentController.getStudents,
 );
 
+// Per-student performance roll-up (must precede "/:id" so it isn't read as an id)
+router.get(
+  "/stats",
+  authenticateToken,
+  authorizeRole("admin", "proprietor"),
+  checkStatus,
+  studentController.getStudentsStats,
+);
+
 router.get(
   "/:id",
   authenticateToken,

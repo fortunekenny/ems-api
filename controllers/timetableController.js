@@ -4,6 +4,11 @@ import mongoose from "mongoose";
 import InternalServerError from "../errors/internal-server-error.js";
 import NotFoundError from "../errors/not-found.js";
 import { getCurrentTermDetails } from "../utils/termGenerator.js";
+import { emitToAuthorized } from "../utils/socket.js";
+
+// A class timetable is non-sensitive shared data, so every role allowed to read
+// it (per timetableRoutes authorizeRole) gets the live update via its role room.
+const TIMETABLE_ROLES = ["admin", "proprietor", "teacher", "student", "parent"];
 
 // Create a new week timetable
 export const createWeekTimetable = async (req, res, next) => {
@@ -24,6 +29,12 @@ export const createWeekTimetable = async (req, res, next) => {
       session,
       schedule,
     });
+    emitToAuthorized(
+      "timetable:updated",
+      { timetableId: timetable._id, classId, term, session, action: "created" },
+      { roles: TIMETABLE_ROLES },
+    );
+
     res
       .status(StatusCodes.CREATED)
       .json({ message: "Week timetable created", timetable });
@@ -71,6 +82,13 @@ export const updateWeekTimetable = async (req, res, next) => {
     if (!timetable) {
       throw new NotFoundError("Week timetable not found");
     }
+
+    emitToAuthorized(
+      "timetable:updated",
+      { timetableId: timetable._id, classId: timetable.classId, action: "updated" },
+      { roles: TIMETABLE_ROLES },
+    );
+
     res
       .status(StatusCodes.OK)
       .json({ message: "Week timetable updated", timetable });

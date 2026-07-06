@@ -14,7 +14,9 @@ import {
 import mongoose from "mongoose";
 import Subject from "../models/SubjectModel.js";
 import Student from "../models/StudentModel.js";
+import { findOrCreateTermRecord } from "../utils/academicRecords.js";
 import UnauthorizedError from "../errors/unauthorize.js";
+import { emitToAuthorized } from "../utils/socket.js";
 
 // Create a new assignment
 
@@ -193,19 +195,23 @@ export const createAssignment = async (req, res, next) => {
     note.assignment = assignment._id;
     await note.save(); // Update the lesson note with the assignment ID
 
-    // Push assignment._id into each student's academicRecords.assignments for the correct session/term/class
+    // Link assignment._id onto each student's (class, session, term) entry,
+    // creating the class group / term entry if it doesn't exist yet.
     const studentIds = assignment.students;
     await Promise.all(
       studentIds.map(async (studentId) => {
-        await Student.updateOne(
-          {
-            _id: studentId,
-            "academicRecords.session": session,
-            "academicRecords.term": term,
-            "academicRecords.classId": classId,
-          },
-          { $addToSet: { "academicRecords.$.assignments": assignment._id } },
-        );
+        const studentDoc = await Student.findById(studentId);
+        if (!studentDoc) return;
+        const rec = findOrCreateTermRecord(studentDoc, {
+          term,
+          session,
+          classId,
+        });
+        if (!rec.assignments) rec.assignments = [];
+        if (!rec.assignments.some((a) => String(a) === String(assignment._id))) {
+          rec.assignments.push(assignment._id);
+          await studentDoc.save();
+        }
       }),
     );
 
@@ -222,6 +228,17 @@ export const createAssignment = async (req, res, next) => {
       },
       recipients: recipients,
     });
+
+    // Live: a new assignment was posted to the class (read roles = staff +
+    // student, no parent). Students' task lists / staff dashboards refresh.
+    emitToAuthorized(
+      "assessment:posted",
+      { type: "assignment", evaluationId: assignment._id, classId },
+      {
+        roles: ["admin", "proprietor", "teacher"],
+        rooms: studentIds.map((id) => id.toString()),
+      },
+    );
 
     // Populate assignment data for response
     const populatedAssignment = await Assignment.findById(
@@ -254,7 +271,7 @@ export const createAssignment = async (req, res, next) => {
 /* export const createAssignment = async (req, res, next) => {
   try {
     const { lessonNote, questions, marksObtainable } = req.body;
-    const { id: userId, role: userRole } = req.user;
+    const { userId, role: userRole } = req.user;
 
     if (!questions || !Array.isArray(questions) || questions.length === 0) {
       throw new BadRequestError(
@@ -984,7 +1001,7 @@ export const updateAssignment = async (req, res, next) => {
 /* export const updateAssignment = async (req, res) => {
   try {
     const { id } = req.params;
-    const { id: userId, role: userRole } = req.user; // Authenticated user ID and role
+    const { userId, role: userRole } = req.user; // Authenticated user ID and role
 
     const assignment = await Assignment.findById(id).populate("lessonNote");
     if (!assignment) {
@@ -1268,7 +1285,7 @@ export const updateAssignmentQuestionList = async (req, res, next) => {
 export const submitAssignment = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const userId = req.user.id;
+    const userId = req.user.userId;
 
     const student = await Student.findById(userId);
     if (!student) {

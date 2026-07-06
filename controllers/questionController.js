@@ -9,7 +9,7 @@ import InternalServerError from "../errors/internal-server-error.js";
 // Create a new question
 export const createQuestion = async (req, res, next) => {
   try {
-    const userId = req.user.id; // Authenticated user ID
+    const userId = req.user.userId; // Authenticated user ID
     const userRole = req.user.role; // Authenticated user role
 
     const {
@@ -226,7 +226,7 @@ export const createQuestion = async (req, res, next) => {
     req.user.role === "admin" ||
     req.user.role === "proprietor" ||
     (lessonNoteExists.subject.subjectTeachers &&
-      lessonNoteExists.subject.subjectTeachers.includes(req.user.id));
+      lessonNoteExists.subject.subjectTeachers.includes(req.user.userId));
 
   if (!isAuthorized) {
     return res.status(StatusCodes.FORBIDDEN).json({
@@ -539,7 +539,7 @@ export const updateQuestion = async (req, res, next) => {
     const { id } = req.params;
     const { questionType, subject: bodySubject, ...rest } = req.body;
 
-    const userId = req.user.id; // Authenticated user ID
+    const userId = req.user.userId; // Authenticated user ID
     const userRole = req.user.role; // Authenticated user role
 
     let subjectTeacherId;
@@ -824,7 +824,7 @@ export const updateQuestionOption = async (req, res, next) => {
       req.user.role === "admin" ||
       req.user.role === "proprietor" ||
       (question.lessonNote.subject.subjectTeachers &&
-        question.lessonNote.subject.subjectTeachers.includes(req.user.id));
+        question.lessonNote.subject.subjectTeachers.includes(req.user.userId));
 
     if (!isAuthorized) {
       return res.status(StatusCodes.FORBIDDEN).json({

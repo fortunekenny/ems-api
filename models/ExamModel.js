@@ -77,7 +77,7 @@ const examSchema = new mongoose.Schema({
   ], // list of students who have submitted exam
   evaluationType: { type: String, required: false, default: "Exam" },
   session: { type: String, default: session }, // e.g., 2023/2024
-  term: { type: String, default: term }, // e.g., First, Second, Third
+  term: { type: String, default: term, lowercase: true }, // e.g., first, second, third
   status: {
     type: String,
     enum: ["pending", "submitted"],

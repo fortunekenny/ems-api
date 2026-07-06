@@ -155,6 +155,8 @@ export const login = async (req, res, next) => {
     throw new UnauthenticatedError("Invalid credentials");
   } catch (error) {
     console.log("Error logging in:", error);
+    // Preserve known auth/client errors (e.g. 401) instead of masking them as 500.
+    if (error.statusCode) return next(error);
     next(new InternalServerError(error.message));
   }
 };

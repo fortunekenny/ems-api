@@ -40,7 +40,7 @@ router.patch(
 );
 
 router.patch(
-  "/:subjectId",
+  "/:subjectId/change-teacher",
   authenticateToken,
   authorizeRole("admin", "proprietor"),
   checkStatus,

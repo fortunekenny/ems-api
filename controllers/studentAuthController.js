@@ -18,6 +18,7 @@ import {
 } from "../utils/termGenerator.js";
 import InternalServerError from "../errors/internal-server-error.js";
 import Staff from "../models/StaffModel.js";
+import { findTermRecord } from "../utils/academicRecords.js";
 
 // Utility to generate a list of school days in a term (excluding weekends)
 const getSchoolDays = (startDate, endDate) => {
@@ -172,8 +173,8 @@ export const registerStudent = async (req, res, next) => {
       academicRecords: [
         {
           classId,
-          term,
           session: sessionName,
+          terms: [{ term }],
         },
       ],
     });
@@ -268,11 +269,11 @@ export const registerStudent = async (req, res, next) => {
       attendanceIds.push(savedAttendance._id);
     }
 
-    // 🔧 Find the current academic record
-    const academicRecord = student.academicRecords.find(
-      (record) =>
-        record.session === currentSession && record.term === currentTerm,
-    );
+    // 🔧 Find the current academic record (the term entry within its class group)
+    const academicRecord = findTermRecord(student, {
+      term: currentTerm,
+      session: currentSession,
+    });
 
     if (!academicRecord) {
       throw new NotFoundError(
@@ -300,11 +301,8 @@ export const registerStudent = async (req, res, next) => {
           select: "_id className section",
         },
         {
-          path: "academicRecords",
-          populate: {
-            path: "attendance",
-            select: "id",
-          },
+          path: "academicRecords.terms.attendance",
+          select: "id",
         },
         {
           path: "parentGuardianId",

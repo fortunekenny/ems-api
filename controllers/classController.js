@@ -273,9 +273,18 @@ export const getClassById = async (req, res, next) => {
 
     // Find the class by ID
     const classData = await Class.findOne({ _id: classId }).populate([
-      { path: "classTeacher", select: "_id name email employeeID" },
-      { path: "subjectTeachers", select: "_id name email employeeID" },
-      { path: "students", select: "_id name email studentID" },
+      {
+        path: "classTeacher",
+        select: "_id firstName middleName lastName email employeeID",
+      },
+      {
+        path: "subjectTeachers",
+        select: "_id firstName middleName lastName email employeeID",
+      },
+      {
+        path: "students",
+        select: "_id firstName middleName lastName email studentID",
+      },
       {
         path: "subjects",
         select: "_id subjectName subjectCode subjectTeachers",

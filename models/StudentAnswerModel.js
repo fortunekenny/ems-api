@@ -345,6 +345,7 @@ const studentAnswerSchema = new mongoose.Schema(
     },
     term: {
       type: String,
+      lowercase: true,
     },
     lessonWeek: {
       type: Number, // Week number of the term (calculated dynamically)

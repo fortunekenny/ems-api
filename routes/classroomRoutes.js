@@ -51,7 +51,11 @@ router.post("/classrooms/:sessionId/leave", ...allAuth, leaveClassroomSession);
 
 // ─── Media ────────────────────────────────────────────────────────────────────
 router.patch("/classrooms/:sessionId/media", ...teacherAuth, updateMedia);
-router.patch("/classrooms/:sessionId/media/current", ...teacherAuth, changeMediaItem);
+router.patch(
+  "/classrooms/:sessionId/media/current",
+  ...teacherAuth,
+  changeMediaItem,
+);
 
 // ─── Board ────────────────────────────────────────────────────────────────────
 router.get("/classrooms/:sessionId/board", ...allAuth, getBoardStrokes);

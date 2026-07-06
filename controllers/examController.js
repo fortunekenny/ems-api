@@ -587,7 +587,7 @@ export const updateExam = async (req, res, next) => {
 export const submitExam = async (req, res, next) => {
   try {
     const { id } = req.params; // Exam ID
-    const userId = req.user.id;
+    const userId = req.user.userId;
     const userRole = req.user.role;
 
     let studentId = userId; // Default to the authenticated user for students
@@ -821,7 +821,7 @@ export const updateExamQuestionList = async (req, res, next) => {
 /*export const getExamWithAnswers = async (req, res, next) => {
   try {
     const { id } = req.params; // Exam ID
-    const studentId = req.user.id; // Current student's ID
+    const studentId = req.user.userId; // Current student's ID
 
     // Fetch the exam with populated questions
     const exam = await Exam.findById(id)
@@ -896,7 +896,7 @@ export const deleteExam = async (req, res) => {
 export const submitExam = async (req, res, next) => {
   try {
     const { id } = req.params; // Exam ID
-    const userId = req.user.id;
+    const userId = req.user.userId;
     const userRole = req.user.role;
 
     let studentId = userId; // Default to the authenticated user for students

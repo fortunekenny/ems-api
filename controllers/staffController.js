@@ -10,6 +10,10 @@ import Student from "../models/StudentModel.js";
 import Subject from "../models/SubjectModel.js"; // Import the Subject model
 import calculateAge from "../utils/ageCalculate.js";
 import {
+  findTermRecord,
+  classIdForTerm,
+} from "../utils/academicRecords.js";
+import {
   notifyStaffStatusChanged,
   notifyStaffVerification,
 } from "../utils/notificationService.js";
@@ -1111,18 +1115,17 @@ export const addStudentToTeacherRecord = async (req, res, next) => {
     }
 
     // 2. Find the academic record for the student for the given term/session
-    const academicRecord = student.academicRecords.find(
-      (rec) => rec.term === term && rec.session === session,
-    );
+    const academicRecord = findTermRecord(student, { term, session });
+    const recordClassId = classIdForTerm(student, { term, session });
 
-    if (!academicRecord || !academicRecord.classId) {
+    if (!academicRecord || !recordClassId) {
       throw new NotFoundError(
         "Student's academic record for this term/session not found",
       );
     }
 
     // 3. Load the class teacher from the class document
-    const assignedClass = await Class.findById(academicRecord.classId);
+    const assignedClass = await Class.findById(recordClassId);
     if (!assignedClass) {
       throw new NotFoundError("Assigned class not found");
     }
@@ -1148,7 +1151,7 @@ export const addStudentToTeacherRecord = async (req, res, next) => {
     if (
       teacherRecord.isClassTeacher &&
       teacherRecord.isClassTeacher.toString() ===
-      academicRecord.classId.toString()
+      recordClassId.toString()
     ) {
       // 6. Add student to teacherRecord.students if not already present
       if (!teacherRecord.students.includes(student._id)) {

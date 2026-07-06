@@ -53,7 +53,7 @@ const gradeSchema = new mongoose.Schema({
   grade: { type: String },
   remark: { type: String }, // Teacher's comment on student performance
   session: { type: String, default: session }, // e.g., 2023/2024
-  term: { type: String, default: term }, // e.g., First, Second, Third
+  term: { type: String, default: term, lowercase: true }, // e.g., first, second, third
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now },
 });

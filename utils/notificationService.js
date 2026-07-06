@@ -1,7 +1,7 @@
 import mongoose from "mongoose";
 import Parent from "../models/ParentModel.js";
 import { sendBulkNotifications } from "../controllers/notificationController.js";
-import { getIO } from "./socket.js";
+import { getIO, emitToAuthorized } from "./socket.js";
 
 // Wraps a notification call so it never crashes the parent request.
 const fire = async (fn) => {
@@ -22,6 +22,34 @@ const getParentRecipients = async (studentId) => {
     ],
   }).select("_id");
   return parents.map((p) => ({ recipientId: p._id, recipientModel: "Parent" }));
+};
+
+// Oversight roles that may read any student's records (from the routes'
+// authorizeRole guards). Live domain events target these via their role rooms.
+const OVERSIGHT_ROLES = ["admin", "proprietor", "teacher"];
+
+// Resolve the owner socket rooms for a student: the student's own room plus all
+// of their parent accounts (every father/mother/singleParent sub-account, and
+// the top-level Parent _id as a safety net). Used for owner-scoped events so a
+// student's private data only ever reaches that student and their parents.
+export const studentRooms = async (studentId) => {
+  const sid = studentId.toString();
+  const rooms = new Set([sid]);
+  const parents = await Parent.find({
+    $or: [
+      { "father.children": studentId },
+      { "mother.children": studentId },
+      { "singleParent.children": studentId },
+    ],
+  }).select("father._id mother._id singleParent._id");
+  for (const p of parents) {
+    rooms.add(p._id.toString());
+    for (const sub of ["father", "mother", "singleParent"]) {
+      const node = p[sub];
+      if (node?._id) rooms.add(node._id.toString());
+    }
+  }
+  return [...rooms];
 };
 
 // Exam scheduled — notify students in the class
@@ -51,6 +79,13 @@ export const notifyExamScheduled = async ({
       },
       recipients,
     });
+
+    // Live data event (exam read roles = staff + student, no parent).
+    emitToAuthorized(
+      "assessment:posted",
+      { type: "exam", evaluationId: exam._id, subject: subjectName, date: exam.date },
+      { roles: OVERSIGHT_ROLES, rooms: students.map((id) => id.toString()) },
+    );
   });
 };
 
@@ -81,6 +116,13 @@ export const notifyTestScheduled = async ({
       },
       recipients,
     });
+
+    // Live data event (test read roles = staff + student, no parent).
+    emitToAuthorized(
+      "assessment:posted",
+      { type: "test", evaluationId: test._id, subject: subjectName, date: test.date },
+      { roles: OVERSIGHT_ROLES, rooms: students.map((id) => id.toString()) },
+    );
   });
 };
 
@@ -111,6 +153,13 @@ export const notifyGradePublished = async ({
       },
       recipients,
     });
+
+    // Owner-scoped live event: student + parents, plus oversight role rooms.
+    emitToAuthorized(
+      "grade:published",
+      { gradeId: grade._id, studentId: studentId.toString(), subject: subjectName },
+      { roles: OVERSIGHT_ROLES, rooms: await studentRooms(studentId) },
+    );
   });
 };
 
@@ -139,6 +188,13 @@ export const notifyReportCardReady = async ({
       },
       recipients,
     });
+
+    // Owner-scoped live event: student + parents, plus oversight role rooms.
+    emitToAuthorized(
+      "reportcard:ready",
+      { reportCardId: reportCard._id, studentId: studentId.toString(), term, session },
+      { roles: OVERSIGHT_ROLES, rooms: await studentRooms(studentId) },
+    );
   });
 };
 
@@ -160,6 +216,13 @@ export const notifyFeeCreated = async ({ fee, studentId, senderId }) => {
       },
       recipients,
     });
+
+    // Owner-scoped live event: student + parents, plus oversight role rooms.
+    emitToAuthorized(
+      "fee:updated",
+      { feeId: fee._id, studentId: studentId.toString(), reason: "created" },
+      { roles: OVERSIGHT_ROLES, rooms: await studentRooms(studentId) },
+    );
   });
 };
 
@@ -184,6 +247,13 @@ export const notifyPaymentRecorded = async ({
       },
       recipients,
     });
+
+    // Owner-scoped live event: student + parents, plus oversight role rooms.
+    emitToAuthorized(
+      "fee:updated",
+      { feeId: fee._id, studentId: studentId.toString(), reason: "payment", amount },
+      { roles: OVERSIGHT_ROLES, rooms: await studentRooms(studentId) },
+    );
   });
 };
 
@@ -228,6 +298,13 @@ export const notifyStaffStatusChanged = async ({
       },
       recipients: [{ recipientId: staff._id, recipientModel: "Staff" }],
     });
+
+    // The affected staff member's own room + admin/proprietor (who manage staff).
+    emitToAuthorized(
+      "account:status",
+      { staffId: staff._id.toString(), status: newStatus },
+      { roles: ["admin", "proprietor"], rooms: [staff._id.toString()] },
+    );
   });
 };
 
@@ -250,7 +327,41 @@ export const notifyStaffVerification = async ({
       },
       recipients: [{ recipientId: staff._id, recipientModel: "Staff" }],
     });
+
+    // The affected staff member's own room + admin/proprietor (who manage staff).
+    emitToAuthorized(
+      "account:status",
+      { staffId: staff._id.toString(), isVerified },
+      { roles: ["admin", "proprietor"], rooms: [staff._id.toString()] },
+    );
   });
+};
+
+// Attendance changed — socket-only live push to the student and their parent
+// account(s) so open dashboards/registers refresh instantly. This does NOT write
+// a notification (the persisted "Absence Alert" is still handled separately by
+// notifyAttendanceAbsent); it's purely a realtime nudge.
+export const notifyAttendanceChanged = async ({ attendance, studentId }) => {
+  try {
+    const payload = {
+      attendanceId: attendance._id,
+      studentId: studentId.toString(),
+      date: attendance.date,
+      morningStatus: attendance.morningStatus,
+      afternoonStatus: attendance.afternoonStatus,
+      term: attendance.term,
+      session: attendance.session,
+    };
+
+    // Owner-scoped to the student + their parents; oversight roles come straight
+    // from attendance's read-route authorizeRole (admin/proprietor/teacher).
+    emitToAuthorized("attendance:changed", payload, {
+      roles: OVERSIGHT_ROLES,
+      rooms: await studentRooms(studentId),
+    });
+  } catch (err) {
+    console.error("[NotificationService] notifyAttendanceChanged:", err.message);
+  }
 };
 
 // New message — socket-only push to each participant except the sender

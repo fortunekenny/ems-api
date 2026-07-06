@@ -44,6 +44,7 @@ const diarySchema = new mongoose.Schema({
   },
   term: {
     type: String,
+    lowercase: true,
   },
   createdAt: {
     type: Date,

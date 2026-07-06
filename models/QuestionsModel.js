@@ -166,6 +166,7 @@ const questionSchema = new mongoose.Schema({
   },
   term: {
     type: String,
+    lowercase: true,
   },
   lessonWeek: {
     type: Number,

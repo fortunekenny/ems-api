@@ -1,20 +1,30 @@
 import { StatusCodes } from "http-status-codes";
+import BadRequestError from "../errors/bad-request.js";
+import InternalServerError from "../errors/internal-server-error.js";
 import NotFoundError from "../errors/not-found.js";
+import UnauthorizedError from "../errors/unauthorize.js";
 import Attendance from "../models/AttendanceModel.js";
 import Class from "../models/ClassModel.js";
+import Fee from "../models/FeeModel.js";
+import Grade from "../models/GradeModel.js";
 import Parent from "../models/ParentModel.js";
+import ReportCard from "../models/ReportcardModel.js";
+import StudentAnswer from "../models/StudentAnswerModel.js";
 import Student from "../models/StudentModel.js";
 import Subject from "../models/SubjectModel.js";
-import checkPermissions from "../utils/checkPermissions.js";
 import calculateAge from "../utils/ageCalculate.js";
-import BadRequestError from "../errors/bad-request.js";
-import UnauthorizedError from "../errors/unauthorize.js";
-import InternalServerError from "../errors/internal-server-error.js";
 import {
   getCurrentTermDetails,
   holidayDurationForEachTerm,
   startTermGenerationDate,
 } from "../utils/termGenerator.js";
+import {
+  academicPopulatePaths,
+  findTermRecord,
+  findGroupByTerm,
+  classIdForTerm,
+  moveTermToClass,
+} from "../utils/academicRecords.js";
 
 // Get all students
 export const getStudents = async (req, res, next) => {
@@ -24,6 +34,7 @@ export const getStudents = async (req, res, next) => {
       "student", // combined filter for firstName, middleName, lastName, studentId
       "className",
       "status",
+      "studentID",
       "term",
       "session",
       "sort",
@@ -56,26 +67,29 @@ export const getStudents = async (req, res, next) => {
     // if (session) matchStage.session = session;
     if (status) matchStage.status = status;
 
-    // Here we use $or on firstName, middleName, lastName, and employeeId if the 'student' parameter is provided.
+    // Here we use $or on firstName, middleName, lastName, and studentID if the 'student' parameter is provided.
     if (student) {
       matchStage.$or = [
         { firstName: { $regex: student, $options: "i" } },
         { middleName: { $regex: student, $options: "i" } },
         { lastName: { $regex: student, $options: "i" } },
-        { employeeId: { $regex: student, $options: "i" } },
+        { studentID: { $regex: student, $options: "i" } },
       ];
     }
 
-    // NOTE: term/session now live in academicRecords
+    // NOTE: session lives on the class group; term lives under its nested terms[]
     if (session) matchStage["academicRecords.session"] = session;
     if (term)
-      matchStage["academicRecords.term"] = { $regex: term, $options: "i" };
+      matchStage["academicRecords.terms.term"] = { $regex: term, $options: "i" };
 
     const pipeline = [];
     pipeline.push({ $match: matchStage });
 
-    // unwind academicRecords so we can filter/project on it
+    // unwind the class groups, then their terms, so we can filter/project on term
     pipeline.push({ $unwind: "$academicRecords" });
+    pipeline.push({
+      $unwind: { path: "$academicRecords.terms", preserveNullAndEmptyArrays: true },
+    });
 
     // Lookup to join class data from the "classes" collection
     pipeline.push({
@@ -130,9 +144,11 @@ export const getStudents = async (req, res, next) => {
           _id: "$classData._id",
           className: "$classData.className",
         },
-        studentId: 1,
+        studentID: 1,
         status: 1,
-        term: "$academicRecords.term",
+        isVerified: 1,
+        createdAt: 1,
+        term: "$academicRecords.terms.term",
         session: "$academicRecords.session",
         // Include other fields from student if needed.
       },
@@ -165,6 +181,116 @@ export const getStudents = async (req, res, next) => {
     });
   } catch (error) {
     console.log("Error getting all students:", error);
+    next(new InternalServerError(error.message));
+  }
+};
+
+/**
+ * Per-student performance roll-up for the admin Students list.
+ * Aggregates grades, attendance and fees server-side (one query each) and
+ * returns a map keyed by studentId:
+ *   { [studentId]: { avgPercentage, passRate, totalGrades,
+ *                    attendanceRate, feesOutstanding } }
+ * Optional ?term= & ?session= scope all three; omitted = all-time.
+ */
+export const getStudentsStats = async (req, res, next) => {
+  try {
+    const { term, session } = req.query;
+    const scope = {};
+    if (term) scope.term = term;
+    if (session) scope.session = session;
+
+    const round = (n) => Math.round((n + Number.EPSILON) * 10) / 10;
+    const idStr = (v) => (v == null ? "" : v.toString());
+
+    // ── Grades: avg %, pass rate (>= 50), total count ──────────────────────
+    const gradeAgg = await Grade.aggregate([
+      { $match: scope },
+      {
+        $group: {
+          _id: "$student",
+          totalGrades: { $sum: 1 },
+          avgPercentage: { $avg: "$percentageScore" },
+          passed: {
+            $sum: { $cond: [{ $gte: ["$percentageScore", 50] }, 1, 0] },
+          },
+        },
+      },
+    ]);
+
+    // ── Attendance: present sessions / opened sessions (present + absent) ──
+    const present = ["present"];
+    const opened = ["present", "absent"];
+    const attendanceAgg = await Attendance.aggregate([
+      { $match: scope },
+      {
+        $group: {
+          _id: "$student",
+          present: {
+            $sum: {
+              $add: [
+                { $cond: [{ $in: ["$morningStatus", present] }, 1, 0] },
+                { $cond: [{ $in: ["$afternoonStatus", present] }, 1, 0] },
+              ],
+            },
+          },
+          opened: {
+            $sum: {
+              $add: [
+                { $cond: [{ $in: ["$morningStatus", opened] }, 1, 0] },
+                { $cond: [{ $in: ["$afternoonStatus", opened] }, 1, 0] },
+              ],
+            },
+          },
+        },
+      },
+    ]);
+
+    // ── Fees: outstanding = amountDue - amountPaid ─────────────────────────
+    const feeAgg = await Fee.aggregate([
+      { $match: scope },
+      {
+        $group: {
+          _id: "$student",
+          due: { $sum: "$amountDue" },
+          paid: { $sum: "$amountPaid" },
+        },
+      },
+    ]);
+
+    const stats = {};
+    const ensure = (id) => {
+      const key = idStr(id);
+      if (!stats[key]) {
+        stats[key] = {
+          avgPercentage: null,
+          passRate: null,
+          totalGrades: 0,
+          attendanceRate: null,
+          feesOutstanding: 0,
+        };
+      }
+      return stats[key];
+    };
+
+    for (const g of gradeAgg) {
+      const s = ensure(g._id);
+      s.totalGrades = g.totalGrades;
+      s.avgPercentage = g.totalGrades ? round(g.avgPercentage) : null;
+      s.passRate = g.totalGrades ? round((g.passed / g.totalGrades) * 100) : null;
+    }
+    for (const a of attendanceAgg) {
+      const s = ensure(a._id);
+      s.attendanceRate = a.opened ? round((a.present / a.opened) * 100) : null;
+    }
+    for (const f of feeAgg) {
+      const s = ensure(f._id);
+      s.feesOutstanding = Math.max(0, (f.due || 0) - (f.paid || 0));
+    }
+
+    res.status(StatusCodes.OK).json({ stats });
+  } catch (error) {
+    console.log("Error getting student stats:", error);
     next(new InternalServerError(error.message));
   }
 };
@@ -264,13 +390,171 @@ export const getStudentById = async (req, res, next) => {
       }
     } */
 
-    // ✅ At this point, access is authorized
-    const student = await Student.findOne({ _id: studentId }).select(
-      "-password",
+    // ✅ At this point, access is authorized.
+    // Load the student with each academic-record reference list populated.
+    const studentDoc = await Student.findOne({ _id: studentId })
+      .select("-password")
+      .populate(academicPopulatePaths);
+
+    if (!studentDoc) {
+      throw new NotFoundError("Student not found");
+    }
+
+    const student = studentDoc.toObject();
+
+    // Back-fill any list that wasn't stored/populated on a record by querying
+    // each source collection for everything that references this student id,
+    // scoped to that record's class & term. We scope on classId (an ObjectId
+    // present on the group and on every related doc) rather than the session
+    // string, because session strings drift between collections (spacing, etc.)
+    // and silently exclude matches. classId is session-specific, so class + term
+    // is both precise and robust. Only fall back to the session string when the
+    // group has no classId. Term is matched case-insensitively ("first"/"First").
+    const ci = (v) => (v ? new RegExp(`^${String(v).trim()}$`, "i") : undefined);
+
+    await Promise.all(
+      (student.academicRecords ?? []).flatMap((group) => {
+        const classId = group.classId?._id ?? group.classId;
+        return (group.terms ?? []).map(async (rec) => {
+          const scope = { student: studentId };
+          if (classId) scope.classId = classId;
+          else if (group.session) scope.session = group.session;
+          if (rec.term) scope.term = ci(rec.term);
+
+          const answersOf = (type) =>
+            StudentAnswer.find({ ...scope, evaluationType: ci(type) });
+
+          const [
+            attendance,
+            assignments,
+            classworks,
+            tests,
+            subjects,
+            exam,
+            reportCard,
+          ] = await Promise.all([
+            rec.attendance?.length ? null : Attendance.find(scope),
+            rec.assignments?.length ? null : answersOf("Assignment"),
+            rec.classworks?.length ? null : answersOf("ClassWork"),
+            rec.tests?.length ? null : answersOf("Test"),
+            rec.subjects?.length
+              ? null
+              : Subject.find(
+                  classId
+                    ? { students: studentId, classId }
+                    : {
+                        students: studentId,
+                        ...(group.session ? { session: group.session } : {}),
+                        ...(rec.term ? { term: ci(rec.term) } : {}),
+                      },
+                ).select("_id subjectName subjectCode classId term session"),
+            // exam and reportCard are single refs (not lists) on the term entry,
+            // per the Student model. Resolve them from their own collections when
+            // they weren't linked at creation time.
+            rec.exam
+              ? null
+              : StudentAnswer.findOne({ ...scope, evaluationType: ci("Exam") }),
+            rec.reportCard ? null : ReportCard.findOne(scope),
+          ]);
+
+          if (attendance) rec.attendance = attendance;
+          if (assignments) rec.assignments = assignments;
+          if (classworks) rec.classworks = classworks;
+          if (tests) rec.tests = tests;
+          if (subjects) rec.subjects = subjects;
+          if (exam) rec.exam = exam;
+          if (reportCard) rec.reportCard = reportCard;
+
+          // Normalize to the full term shape defined by the Student model so no
+          // field is ever missing from the response — lists default to [] and
+          // single refs to null even when there's genuinely nothing linked.
+          rec.attendance = rec.attendance ?? [];
+          rec.assignments = rec.assignments ?? [];
+          rec.classworks = rec.classworks ?? [];
+          rec.tests = rec.tests ?? [];
+          rec.subjects = rec.subjects ?? [];
+          rec.exam = rec.exam ?? null;
+          rec.reportCard = rec.reportCard ?? null;
+        });
+      }),
     );
 
-    if (!student) {
-      throw new NotFoundError("Student not found");
+    // ── Reconcile orphaned work ────────────────────────────────────────────
+    // The back-fill above only fills term entries that ALREADY exist in
+    // academicRecords. But a student can have real work (submissions, attendance,
+    // report cards) for a (session, term) their academicRecords was never
+    // extended to — e.g. a new session where no record group was created, yet
+    // assignments were done. That work would otherwise stay invisible. Here we
+    // synthesize a group for any (session, term) that has source data but no
+    // matching academicRecords entry, so the response reflects all real work.
+    const termKey = (session, term) =>
+      `${session ?? ""}|${String(term ?? "").toLowerCase()}`;
+
+    const representedKeys = new Set();
+    for (const g of student.academicRecords ?? []) {
+      for (const t of g.terms ?? []) representedKeys.add(termKey(g.session, t.term));
+    }
+
+    const [allAnswers, allAttendance, allReports] = await Promise.all([
+      StudentAnswer.find({ student: studentId }).lean(),
+      Attendance.find({ student: studentId }).lean(),
+      ReportCard.find({ student: studentId }).lean(),
+    ]);
+
+    const emptyTerm = (term) => ({
+      term,
+      attendance: [],
+      assignments: [],
+      classworks: [],
+      tests: [],
+      exam: null,
+      reportCard: null,
+      subjects: [],
+    });
+    const buckets = new Map(); // (session|term) -> { session, term, classId, rec }
+    const getBucket = (session, term, classId) => {
+      const k = termKey(session, term);
+      if (!buckets.has(k)) buckets.set(k, { session, term, classId, rec: emptyTerm(term) });
+      const b = buckets.get(k);
+      if (!b.classId && classId) b.classId = classId;
+      return b;
+    };
+    for (const a of allAnswers) {
+      const b = getBucket(a.session, a.term, a.classId).rec;
+      const et = String(a.evaluationType || "").toLowerCase();
+      if (et === "assignment") b.assignments.push(a);
+      else if (et === "classwork") b.classworks.push(a);
+      else if (et === "test") b.tests.push(a);
+      else if (et === "exam") b.exam = a;
+    }
+    for (const at of allAttendance) getBucket(at.session, at.term, at.classId).rec.attendance.push(at);
+    for (const rc of allReports) getBucket(rc.session, rc.term, rc.classId).rec.reportCard = rc;
+
+    const missing = [...buckets.values()].filter(
+      (b) => (b.session || b.term) && !representedKeys.has(termKey(b.session, b.term)),
+    );
+    if (missing.length) {
+      const classIds = [
+        ...new Set(missing.map((b) => String(b.classId)).filter((x) => x && x !== "undefined")),
+      ];
+      const classes = classIds.length
+        ? await Class.find({ _id: { $in: classIds } }).select("_id className").lean()
+        : [];
+      const classMap = new Map(classes.map((c) => [String(c._id), c]));
+
+      for (const b of missing) {
+        b.rec.subjects = b.classId
+          ? await Subject.find({ students: studentId, classId: b.classId })
+              .select("_id subjectName subjectCode classId term session")
+              .lean()
+          : [];
+        student.academicRecords.push({
+          session: b.session,
+          classId: b.classId ? classMap.get(String(b.classId)) ?? { _id: b.classId } : null,
+          terms: [b.rec],
+          reconciled: true, // synthesized from source data, not stored on the doc
+        });
+      }
     }
 
     res.status(StatusCodes.OK).json(student);
@@ -341,17 +625,16 @@ export const updateStudent = async (req, res, next) => {
 
     // Step 2: Change class within the current term/session embedded record
     if (classId && term && session) {
-      // 2a) Locate the embedded record for this term/session
-      const record = student.academicRecords.find(
-        (rec) => rec.term === term && rec.session === session,
-      );
-      if (!record) {
+      // 2a) Locate the class group + term entry for this term/session
+      const record = findTermRecord(student, { term, session });
+      const group = findGroupByTerm(student, { term, session });
+      if (!record || !group) {
         throw new BadRequestError(
           `No academic record found for term '${term}' and session '${session}'`,
         );
       }
 
-      const previousClassId = record.classId?.toString();
+      const previousClassId = group.classId?.toString();
 
       // 2b) Remove student from previous class (if any)
       if (previousClassId && previousClassId !== classId) {
@@ -393,23 +676,15 @@ export const updateStudent = async (req, res, next) => {
         }
       }
 
-      // 2e) Finally, update the embedded academic record in MongoDB
-      await Student.updateOne(
-        {
-          _id: student._id,
-          "academicRecords.term": term,
-          "academicRecords.session": session,
-        },
-        {
-          $set: {
-            "academicRecords.$.classId": classId,
-          },
-          $addToSet: {
-            // reset the subjects list to exactly the new class's subjects
-            "academicRecords.$.subjects": { $each: newClass.subjects },
-          },
-        },
-      );
+      // 2e) Relocate the term entry to the new class's group (classId lives on
+      //     the group), preserving its attendance/answers, and reset subjects.
+      //     Persisted by the student.save() below.
+      moveTermToClass(student, {
+        term,
+        session,
+        classId,
+        subjects: newClass.subjects,
+      });
     }
 
     let age;
@@ -722,17 +997,19 @@ export const addStudentToClass = async (req, res, next) => {
       }
     }
 
-    // Update student's classId
-    // student.classId = classId;
-    // await student.save();
-    await Student.updateOne(
-      {
-        _id: studentId,
-        "academicRecords.term": currentTerm,
-        "academicRecords.session": currentSession,
-      },
-      { $set: { "academicRecords.$.classId": classId } },
+    // Reflect the class change on the current term's academic record (relocating
+    // the term entry into the new class's group).
+    const { term: curTerm, session: curSession } = getCurrentTermDetails(
+      startTermGenerationDate,
+      holidayDurationForEachTerm,
     );
+    moveTermToClass(student, {
+      term: curTerm,
+      session: curSession,
+      classId,
+      subjects: newClass.subjects.map((s) => s._id),
+    });
+    await student.save();
 
     // Update all attendance records from the date of the change
     const dateFrom = changeDate ? new Date(changeDate) : new Date();
@@ -763,7 +1040,7 @@ export const removeStudentFromClass = async (req, res, next) => {
     }
 
     // 1) Load student
-    const student = await Student.findById(studentId).lean();
+    const student = await Student.findById(studentId);
     if (!student) {
       throw new NotFoundError("Student not found");
     }
@@ -775,15 +1052,13 @@ export const removeStudentFromClass = async (req, res, next) => {
     );
 
     // 3) Find the embedded record
-    const record = student.academicRecords.find(
-      (rec) => rec.term === term && rec.session === session,
-    );
+    const record = findTermRecord(student, { term, session });
     if (!record) {
       throw new BadRequestError(
         `No academic record found for term '${term}' and session '${session}'`,
       );
     }
-    const oldClassId = record.classId?.toString();
+    const oldClassId = classIdForTerm(student, { term, session })?.toString();
     if (!oldClassId) {
       throw new BadRequestError(
         "Student is not assigned to any class in the current term/session",
@@ -841,20 +1116,14 @@ export const removeStudentFromClass = async (req, res, next) => {
       { $set: { classId: newClassId } },
     );
 
-    // 10) Update the embedded academicRecords entry
-    await Student.updateOne(
-      {
-        _id: studentId,
-        "academicRecords.term": term,
-        "academicRecords.session": session,
-      },
-      {
-        $set: {
-          "academicRecords.$.classId": newClassId,
-          "academicRecords.$.subjects": newClassPop.subjects.map((s) => s._id),
-        },
-      },
-    );
+    // 10) Relocate the term entry to the new class's group and reset subjects.
+    moveTermToClass(student, {
+      term,
+      session,
+      classId: newClassId,
+      subjects: newClassPop.subjects.map((s) => s._id),
+    });
+    await student.save();
 
     res.status(StatusCodes.OK).json({
       message: "Student moved to new class and records updated successfully",
@@ -918,10 +1187,9 @@ export const addStudentToSubject = async (req, res, next) => {
     );
 
     // 3) Find academic record
-    const record = student.academicRecords.find(
-      (rec) => rec.term === term && rec.session === session,
-    );
-    if (!record || !record.classId) {
+    const record = findTermRecord(student, { term, session });
+    const enrolledClassId = classIdForTerm(student, { term, session });
+    if (!record || !enrolledClassId) {
       throw new BadRequestError(
         "Student is not enrolled in a class this term/session",
       );
@@ -932,7 +1200,7 @@ export const addStudentToSubject = async (req, res, next) => {
     if (!subject) throw new NotFoundError("Subject not found");
 
     // 5) Verify subject belongs to the student's current class
-    const classDoc = await Class.findById(record.classId);
+    const classDoc = await Class.findById(enrolledClassId);
     if (!classDoc || !classDoc.subjects.includes(subject._id)) {
       throw new BadRequestError(
         "Subject does not belong to student's current class",
@@ -1015,10 +1283,9 @@ export const removeStudentFromSubject = async (req, res, next) => {
     );
 
     // 3) Find academic record
-    const record = student.academicRecords.find(
-      (rec) => rec.term === term && rec.session === session,
-    );
-    if (!record || !record.classId) {
+    const record = findTermRecord(student, { term, session });
+    const enrolledClassId = classIdForTerm(student, { term, session });
+    if (!record || !enrolledClassId) {
       throw new BadRequestError(
         "Student is not enrolled in a class this term/session",
       );
@@ -1034,15 +1301,9 @@ export const removeStudentFromSubject = async (req, res, next) => {
       { $pull: { students: student._id } },
     );
 
-    // 6) Remove subject from student’s academic record
-    await Student.updateOne(
-      {
-        _id: student._id,
-        "academicRecords.term": term,
-        "academicRecords.session": session,
-      },
-      { $pull: { "academicRecords.$.subjects": subject._id } },
-    );
+    // 6) Remove subject from the student's term entry
+    record.subjects.pull(subject._id);
+    await student.save();
 
     res
       .status(StatusCodes.OK)

@@ -21,7 +21,7 @@ const resolveParticipantModel = (role) => {
 export const createConversation = async (req, res, next) => {
   try {
     const { participants, isGroup, groupName } = req.body;
-    const userId = req.user.id;
+    const userId = req.user.userId;
     const userRole = req.user.role;
     const senderModel = resolveParticipantModel(userRole);
 
@@ -80,7 +80,7 @@ export const createConversation = async (req, res, next) => {
 // GET /conversations
 export const getConversations = async (req, res, next) => {
   try {
-    const userId = req.user.id;
+    const userId = req.user.userId;
 
     const conversations = await Conversation.find({
       "participants.participantId": userId,
@@ -99,7 +99,7 @@ export const getConversations = async (req, res, next) => {
 export const getConversationById = async (req, res, next) => {
   try {
     const { conversationId } = req.params;
-    const userId = req.user.id;
+    const userId = req.user.userId;
 
     const conversation = await Conversation.findOne({
       _id: conversationId,
@@ -120,7 +120,7 @@ export const addParticipant = async (req, res, next) => {
   try {
     const { conversationId } = req.params;
     const { participantId, participantModel } = req.body;
-    const userId = req.user.id;
+    const userId = req.user.userId;
 
     const conversation = await Conversation.findById(conversationId);
     if (!conversation) throw new NotFoundError("Conversation not found.");
@@ -155,7 +155,7 @@ export const addParticipant = async (req, res, next) => {
 export const removeParticipant = async (req, res, next) => {
   try {
     const { conversationId, participantId } = req.params;
-    const userId = req.user.id;
+    const userId = req.user.userId;
 
     const conversation = await Conversation.findById(conversationId);
     if (!conversation) throw new NotFoundError("Conversation not found.");
@@ -188,7 +188,7 @@ export const removeParticipant = async (req, res, next) => {
 export const leaveConversation = async (req, res, next) => {
   try {
     const { conversationId } = req.params;
-    const userId = req.user.id;
+    const userId = req.user.userId;
 
     const conversation = await Conversation.findById(conversationId);
     if (!conversation) throw new NotFoundError("Conversation not found.");
@@ -229,7 +229,7 @@ export const sendMessage = async (req, res, next) => {
   try {
     const { conversationId } = req.params;
     const { content, attachments, replyTo } = req.body;
-    const userId = req.user.id;
+    const userId = req.user.userId;
     const userRole = req.user.role;
     const senderModel = resolveParticipantModel(userRole);
 
@@ -277,7 +277,7 @@ export const sendMessage = async (req, res, next) => {
 export const getMessages = async (req, res, next) => {
   try {
     const { conversationId } = req.params;
-    const userId = req.user.id;
+    const userId = req.user.userId;
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 20;
 
@@ -317,7 +317,7 @@ export const getMessages = async (req, res, next) => {
 export const markAsRead = async (req, res, next) => {
   try {
     const { conversationId } = req.params;
-    const userId = req.user.id;
+    const userId = req.user.userId;
     const userRole = req.user.role;
     const participantModel = resolveParticipantModel(userRole);
 
@@ -354,7 +354,7 @@ export const editMessage = async (req, res, next) => {
   try {
     const { messageId } = req.params;
     const { content } = req.body;
-    const userId = req.user.id;
+    const userId = req.user.userId;
 
     if (!content)
       throw new BadRequestError("Content is required to edit a message.");
@@ -383,7 +383,7 @@ export const editMessage = async (req, res, next) => {
 export const deleteMessage = async (req, res, next) => {
   try {
     const { messageId } = req.params;
-    const userId = req.user.id;
+    const userId = req.user.userId;
     const userRole = req.user.role;
 
     const message = await Message.findById(messageId);
@@ -419,7 +419,7 @@ export const addReaction = async (req, res, next) => {
   try {
     const { messageId } = req.params;
     const { emoji } = req.body;
-    const userId = req.user.id;
+    const userId = req.user.userId;
     const userRole = req.user.role;
     const participantModel = resolveParticipantModel(userRole);
 
@@ -452,7 +452,7 @@ export const addReaction = async (req, res, next) => {
 export const removeReaction = async (req, res, next) => {
   try {
     const { messageId } = req.params;
-    const userId = req.user.id;
+    const userId = req.user.userId;
 
     const message = await Message.findById(messageId);
     if (!message) throw new NotFoundError("Message not found.");
@@ -478,7 +478,7 @@ export const forwardMessage = async (req, res, next) => {
   try {
     const { messageId } = req.params;
     const { conversationId } = req.body;
-    const userId = req.user.id;
+    const userId = req.user.userId;
     const userRole = req.user.role;
     const senderModel = resolveParticipantModel(userRole);
 
@@ -528,7 +528,7 @@ export const forwardMessage = async (req, res, next) => {
 export const broadcastMessage = async (req, res, next) => {
   try {
     const { content, attachments, recipients } = req.body;
-    const userId = req.user.id;
+    const userId = req.user.userId;
     const userRole = req.user.role;
     const senderModel = resolveParticipantModel(userRole);
 
@@ -605,7 +605,7 @@ export const searchMessages = async (req, res, next) => {
   try {
     const { conversationId } = req.params;
     const { q } = req.query;
-    const userId = req.user.id;
+    const userId = req.user.userId;
 
     if (!q) throw new BadRequestError("Search query 'q' is required.");
 

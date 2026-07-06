@@ -16,7 +16,7 @@ const feeSchema = new mongoose.Schema({
   installments: [installmentSchema], // Array to store installment payments
   dueDate: { type: Date, required: true }, // Final due date for payment
   session: { type: String, required: true }, // e.g., 2023/2024
-  term: { type: String, required: true }, // e.g., First, Second, Third
+  term: { type: String, required: true, lowercase: true }, // e.g., first, second, third
   status: {
     type: String,
     enum: ["Paid", "Pending", "Overdue"],

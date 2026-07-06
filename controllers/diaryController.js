@@ -11,10 +11,14 @@ import { StatusCodes } from "http-status-codes";
 import BadRequestError from "../errors/bad-request.js";
 import InternalServerError from "../errors/internal-server-error.js";
 import NotFoundError from "../errors/not-found.js";
+import { emitToAuthorized } from "../utils/socket.js";
+
+// Diary is a staff-only resource (diaryRoutes authorizeRole = admin/proprietor/teacher).
+const DIARY_ROLES = ["admin", "proprietor", "teacher"];
 
 export const createDiary = async (req, res, next) => {
   try {
-    const userId = req.user.id;
+    const userId = req.user.userId;
     const userRole = req.user.role;
 
     // Get the term start date and calculate the one-week creation window
@@ -72,6 +76,12 @@ export const createDiary = async (req, res, next) => {
     const diary = new Diary(req.body);
     await diary.save();
 
+    emitToAuthorized(
+      "diary:updated",
+      { diaryId: diary._id, classId: diary.classId, action: "created" },
+      { roles: DIARY_ROLES },
+    );
+
     res.status(StatusCodes.CREATED).json(diary);
   } catch (error) {
     console.error("Error creating diary entry:", error);
@@ -127,7 +137,7 @@ export const getDiaryById = async (req, res, next) => {
 export const updateDiary = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const userId = req.user.id;
+    const userId = req.user.userId;
     const userRole = req.user.role;
 
     // Fetch the existing Diary
@@ -193,6 +203,12 @@ export const approveDiary = async (req, res, next) => {
 
     // Save the updated diary
     await diary.save();
+
+    emitToAuthorized(
+      "diary:updated",
+      { diaryId: diary._id, classId: diary.classId, action: "approved" },
+      { roles: DIARY_ROLES },
+    );
 
     // Return the updated diary
     res.status(StatusCodes.OK).json({
@@ -288,7 +304,7 @@ export const copyDiaryToCurrentSession = async (req, res, next) => {
     }
 
     // Resolve subjectTeacher based on role
-    const userId = req.user.id;
+    const userId = req.user.userId;
     const userRole = req.user.role;
     let subjectTeacher;
 

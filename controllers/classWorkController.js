@@ -13,6 +13,7 @@ import {
 } from "./notificationController.js";
 import Subject from "../models/SubjectModel.js";
 import mongoose from "mongoose";
+import { emitToAuthorized } from "../utils/socket.js";
 
 // Create ClassWork
 
@@ -177,6 +178,16 @@ export const createClassWork = async (req, res, next) => {
 
     // After classwork is saved, trigger notifications for the class.
     await createNotificationForClasswork(classWork, req.user.userId);
+
+    // Live: new classwork posted to the class (read roles = staff + student).
+    emitToAuthorized(
+      "classwork:posted",
+      { type: "classwork", evaluationId: classWork._id, classId: req.body.classId },
+      {
+        roles: ["admin", "proprietor", "teacher"],
+        rooms: req.body.students.map((id) => id.toString()),
+      },
+    );
 
     // Populate fields for the response
     const populatedClassWork = await ClassWork.findById(classWork._id).populate(
@@ -452,7 +463,7 @@ export const getClassWorkById = async (req, res, next) => {
 export const updateClassWork = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { id: userId, role: userRole } = req.user; // Authenticated user ID and role
+    const { userId, role: userRole } = req.user; // Authenticated user ID and role
 
     // Fetch the existing ClassWork
     const classWork = await ClassWork.findById(id).populate("lessonNote");
@@ -768,7 +779,7 @@ export const updateClassWorkQuestionList = async (req, res, next) => {
 export const submitClassWork = async (req, res, next) => {
   try {
     const { id } = req.params; // ClassWork ID
-    const userId = req.user.id; // Student ID
+    const userId = req.user.userId; // Student ID
 
     const classWork = await ClassWork.findById(id);
     if (!classWork) throw new NotFoundError("ClassWork not found.");

@@ -20,6 +20,7 @@ import {
 } from "./notificationController.js";
 // import { ObjectId } from "mongoose";
 import mongoose from "mongoose";
+import { emitToAuthorized } from "../utils/socket.js";
 
 // Create a new lesson note
 export const createLessonNote = async (req, res, next) => {
@@ -210,6 +211,13 @@ export const createLessonNote = async (req, res, next) => {
       },
       recipients: recipients,
     });
+
+    // Live: a lesson note entered the approval queue (staff-only resource).
+    emitToAuthorized(
+      "lessonnote:submitted",
+      { lessonNoteId: lessonNote._id, classId: lessonNote.classId, week: lessonNote.lessonWeek },
+      { roles: ["admin", "proprietor", "teacher"] },
+    );
 
     const populatedLessonNote = await LessonNote.findById(
       lessonNote._id,
@@ -627,7 +635,7 @@ export const getLessonNoteByWeek = async (req, res, next) => {
 /*export const updateLessonNote = async (req, res, next) => {
   try {
     const { id } = req.params; // Lesson note ID from request params
-    const { id: userId, role: role } = req.user; // Authenticated user details
+    const { userId, role } = req.user; // Authenticated user details
 
     // Fetch the existing lesson note to validate authorization
     const lessonNote = await LessonNote.findById(id).populate("teacher");
@@ -716,7 +724,7 @@ export const getLessonNoteByWeek = async (req, res, next) => {
 /*export const updateLessonNote = async (req, res, next) => {
   try {
     const { id } = req.params; // Lesson note ID
-    const { id: userId, role: role } = req.user; // Authenticated user
+    const { userId, role } = req.user; // Authenticated user
 
     // Fetch the existing lesson note
     const lessonNote = await LessonNote.findById(id).populate("teacher");
@@ -820,7 +828,7 @@ export const getLessonNoteByWeek = async (req, res, next) => {
 export const updateLessonNote = async (req, res, next) => {
   try {
     const { id } = req.params; // Test ID from request params
-    const { id: userId, role: role } = req.user; // Authenticated user ID and role
+    const { userId, role } = req.user; // Authenticated user ID and role
 
     // Fetch the existing lesson note to validate authorization
     const lessonNote = await LessonNote.findById(id).populate("teacher");
@@ -1139,6 +1147,16 @@ export const approveLessonNote = async (req, res, next) => {
       recipients: recipients,
     });
 
+    // Live: approval clears it from the queue; notify staff + the authoring teacher.
+    emitToAuthorized(
+      "lessonnote:approved",
+      { lessonNoteId: lessonNote._id, teacherId: lessonNote.teacher?.toString() },
+      {
+        roles: ["admin", "proprietor", "teacher"],
+        rooms: lessonNote.teacher ? [lessonNote.teacher.toString()] : [],
+      },
+    );
+
     // Return the updated lessonNote
     res.status(StatusCodes.OK).json({
       message: "LessonNote approved successfully.",
@@ -1154,7 +1172,7 @@ export const approveLessonNote = async (req, res, next) => {
 export const updateLessonNoteContent = async (req, res, next) => {
   try {
     const { id } = req.params; // Lesson note ID
-    const { id: userId, role } = req.user; // Authenticated user
+    const { userId, role } = req.user; // Authenticated user
     const { action, index, value } = req.body; // action: "set" | "push" | "pull"; index (for set/pull); value (for set/push)
 
     // Fetch the existing lesson note

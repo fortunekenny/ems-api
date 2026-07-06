@@ -322,9 +322,10 @@ export const getCurrentTermDetails = (
   });
   const dayOfTerm = todayIndex === -1 ? schoolDays.length : todayIndex + 1;
 
-  const msInAWeek = 7 * msInADay;
-  const weeksElapsed = Math.floor(dayOfTerm / 5); // 5 school days per week
-  const weekOfTerm = weeksElapsed + 1; // Adding 1 to make it 1-indexed
+  // Group every 5 school days into a numbered week: days 1–5 → week 1,
+  // 6–10 → week 2, etc. Math.ceil avoids the off-by-one at each 5-day boundary
+  // that Math.floor(dayOfTerm / 5) + 1 caused (e.g. day 5 fell into week 2).
+  const weekOfTerm = dayOfTerm > 0 ? Math.ceil(dayOfTerm / 5) : 1;
 
   // Calculate school days (weekdays only) in the term
   /* const schoolDays = [];

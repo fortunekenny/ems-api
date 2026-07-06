@@ -16,9 +16,9 @@ export const createNotification = async (req, res, next) => {
   try {
     const { recipient, recipientModel, title, message, type, session, term } =
       req.body;
-    const { id } = req.user;
+    const { userId } = req.user;
 
-    const sender = id;
+    const sender = userId;
 
     const broadcastId = new mongoose.Types.ObjectId();
 

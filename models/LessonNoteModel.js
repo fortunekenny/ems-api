@@ -104,6 +104,7 @@ const lessonNoteSchema = new mongoose.Schema({
   },
   term: {
     type: String,
+    lowercase: true,
     default: term,
   },
   createdAt: {

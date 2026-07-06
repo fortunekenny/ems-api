@@ -50,7 +50,7 @@ const reportCardSchema = new mongoose.Schema({
   numberOfTimesPresent: { type: Number, default: 0 }, // Total number of times student was present in the term
   numberOfTimesAbsent: { type: Number, default: 0 }, // Total number of times student was absent in the term
   session: { type: String, default: session }, // e.g., 2023/2024
-  term: { type: String, default: term }, // e.g., First, Second, Third
+  term: { type: String, default: term, lowercase: true }, // e.g., first, second, third
   nextTermResumptionDate: { type: Date, default: nextTermStartDate }, // Date student resume for next term
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now },

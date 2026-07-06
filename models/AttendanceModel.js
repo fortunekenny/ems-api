@@ -49,6 +49,7 @@ const attendanceSchema = new mongoose.Schema({
   },
   term: {
     type: String,
+    lowercase: true,
     default: function () {
       const { term } = getCurrentTermDetails(
         startTermGenerationDate,
@@ -59,13 +60,8 @@ const attendanceSchema = new mongoose.Schema({
   },
   weekOfTerm: {
     type: Number,
-    default: function () {
-      const { weekOfTerm } = getCurrentTermDetails(
-        startTermGenerationDate,
-        holidayDurationForEachTerm,
-      );
-      return weekOfTerm;
-    },
+    // Derived from dayOfTerm in the pre-validate hook below: every 5 school days
+    // is one week, numbered from 1 (days 1–5 → week 1, 6–10 → week 2, …).
   },
   dayOfTerm: {
     type: Number,
@@ -84,6 +80,14 @@ const attendanceSchema = new mongoose.Schema({
   timeMarkedAfternoon: {
     type: Date,
     default: null, // Timestamp for marking afternoon attendance
+  },
+  markedByMorning: {
+    type: String,
+    default: null, // Full name of the user who marked morning attendance
+  },
+  markedByAfternoon: {
+    type: String,
+    default: null, // Full name of the user who marked afternoon attendance
   },
   // publicHolidays: [
   //   {type: Date} // Array of public holiday dates in the term}
@@ -116,6 +120,17 @@ const attendanceSchema = new mongoose.Schema({
 
 attendanceSchema.pre("save", function (next) {
   this.updatedAt = Date.now();
+  next();
+});
+
+// Keep weekOfTerm consistent with dayOfTerm: every 5 school days is one week,
+// numbered from 1 (days 1–5 → week 1, 6–10 → week 2, …). dayOfTerm is supplied
+// per record by the bulk creator, or falls back to its own (today-based) default
+// when a single day is marked.
+attendanceSchema.pre("validate", function (next) {
+  if (typeof this.dayOfTerm === "number" && this.dayOfTerm > 0) {
+    this.weekOfTerm = Math.ceil(this.dayOfTerm / 5);
+  }
   next();
 });
 

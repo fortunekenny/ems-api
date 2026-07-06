@@ -19,7 +19,12 @@ const apiLimiter = rateLimiter({
 });
 
 // Apply rate limiter to the register and login routes
-router.post("/registerParent", apiLimiter, registerParent);
+router.post(
+  "/registerParent",
+  apiLimiter,
+  // authorizeRole("admin"),
+  registerParent,
+);
 router.post(
   "/registerStudent",
   apiLimiter,
@@ -27,7 +32,13 @@ router.post(
   authorizeRole("admin", "parent"),
   registerStudent,
 );
-router.post("/registerStaff", apiLimiter, registerStaff);
+router.post(
+  "/registerStaff",
+  apiLimiter,
+  authenticateToken,
+  authorizeRole("admin"),
+  registerStaff,
+);
 router.post("/login", apiLimiter, authController.login);
 router.get("/logout", authController.logout);
 

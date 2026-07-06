@@ -15,37 +15,57 @@ import Parent from "../models/ParentModel.js";
 export default checkPermissions;
  */
 
-export const checkPermissions = async (requestUser, resourceUserId) => {
-  const { role, subRole, userId } = requestUser;
-  // console.log("role:", role);
-  // console.log("subRole:", subRole);
-  // console.log("userId:", userId);
-  // console.log("resourceUserId:", resourceUserId);
+export const checkPermissions = async (requestUserOrReq, resourceUserIdOrRes, next) => {
+  const isMiddleware = typeof next === "function";
 
-  if (role === "admin" || role === "proprietor" || role === "teacher") return;
+  let requestUser, resourceUserId;
 
-  // Allow if user is the owner of the resource
-  if (userId === resourceUserId.toString()) return;
-
-  // Additional check for parents
-  if (role === "parent") {
-    if (!["father", "mother", "singleParent"].includes(subRole)) {
-      throw new UnauthorizedError("Invalid subRole for parent");
-    }
-
-    // Check if parent with the given subRole contains the user and student
-    const parent = await Parent.findOne({
-      [`${subRole}._id`]: userId,
-      [`${subRole}.children`]: resourceUserId, // assuming this is studentId
-    });
-
-    if (!parent) {
-      throw new UnauthorizedError("You are not his/her parent or guardian");
-    }
-
-    return;
+  if (isMiddleware) {
+    const req = requestUserOrReq;
+    requestUser = req.user;
+    // Grab the first route param value (e.g. staffId, studentId, etc.)
+    resourceUserId = Object.values(req.params)[0];
+  } else {
+    requestUser = requestUserOrReq;
+    resourceUserId = resourceUserIdOrRes;
   }
 
-  throw new UnauthenticatedError("You are not allowed to access this route");
+  const run = async () => {
+    const { role, subRole, userId } = requestUser;
+
+    if (role === "admin" || role === "proprietor" || role === "teacher" || role === "non-teacher") return;
+
+    if (userId === resourceUserId?.toString()) return;
+
+    if (role === "parent") {
+      if (!["father", "mother", "singleParent"].includes(subRole)) {
+        throw new UnauthorizedError("Invalid subRole for parent");
+      }
+
+      const parent = await Parent.findOne({
+        [`${subRole}._id`]: userId,
+        [`${subRole}.children`]: resourceUserId,
+      });
+
+      if (!parent) {
+        throw new UnauthorizedError("You are not his/her parent or guardian");
+      }
+
+      return;
+    }
+
+    throw new UnauthenticatedError("You are not allowed to access this route");
+  };
+
+  if (isMiddleware) {
+    try {
+      await run();
+      next();
+    } catch (err) {
+      next(err);
+    }
+  } else {
+    await run();
+  }
 };
 export default checkPermissions;

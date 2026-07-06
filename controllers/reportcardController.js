@@ -9,6 +9,7 @@ import Staff from "../models/StaffModel.js";
 import Student from "../models/StudentModel.js";
 import PDFDocument from "pdfkit";
 import { notifyReportCardReady } from "../utils/notificationService.js";
+import { findTermRecord } from "../utils/academicRecords.js";
 import {
   getCurrentTermDetails, // Ensure this is correctly defined
   holidayDurationForEachTerm,
@@ -49,7 +50,7 @@ export const createReportCard = async (req, res, next) => {
       throw new BadRequestError("Required fields must be provided.");
     }
 
-    const { id: userId, role: userRole } = req.user;
+    const { userId, role: userRole } = req.user;
 
     let classTeacherId;
     let isAuthorized = false;
@@ -245,13 +246,7 @@ export const createReportCard = async (req, res, next) => {
     // Update the student's academicRecords for this session/term/class to set reportCard
     const studentDoc = await Student.findById(student);
     if (studentDoc && Array.isArray(studentDoc.academicRecords)) {
-      const record = studentDoc.academicRecords.find(
-        (rec) =>
-          rec.session === session &&
-          rec.term === term &&
-          rec.classId &&
-          rec.classId.toString() === classId.toString(),
-      );
+      const record = findTermRecord(studentDoc, { term, session, classId });
       if (record) {
         record.reportCard = reportCard._id;
         await studentDoc.save();
@@ -308,7 +303,7 @@ export const createReportCard = async (req, res, next) => {
       className: classData.className,
       term,
       session,
-      senderId: req.user.id || req.user.userId,
+      senderId: req.user.userId,
     });
 
     res.status(StatusCodes.CREATED).json({
@@ -354,7 +349,7 @@ export const createReportCardsForClass = async (req, res, next) => {
     }
 
     // Authorization check: Only allow if the requester is an admin, proprietor, or the class teacher.
-    const { id: userId, role: userRole } = req.user;
+    const { userId, role: userRole } = req.user;
     let classTeacherId;
     let isAuthorized = false;
     if (["admin", "proprietor"].includes(userRole)) {
@@ -553,13 +548,11 @@ export const createReportCardsForClass = async (req, res, next) => {
     for (const rc of createdReportCards) {
       const studentDoc = await Student.findById(rc.student);
       if (studentDoc && Array.isArray(studentDoc.academicRecords)) {
-        const record = studentDoc.academicRecords.find(
-          (rec) =>
-            rec.session === rc.session &&
-            rec.term === rc.term &&
-            rec.classId &&
-            rec.classId.toString() === rc.classId.toString(),
-        );
+        const record = findTermRecord(studentDoc, {
+          term: rc.term,
+          session: rc.session,
+          classId: rc.classId,
+        });
         if (record) {
           record.reportCard = rc._id;
           await studentDoc.save();
@@ -603,7 +596,7 @@ export const createReportCardsForClass = async (req, res, next) => {
       .populate({ path: "teacher", select: "_id firstName lastName" });
 
     // Notify each student (and their parents) that their report card is ready
-    const senderId = req.user.id || req.user.userId;
+    const senderId = req.user.userId;
     await Promise.all(
       createdReportCards.map((rc) =>
         notifyReportCardReady({

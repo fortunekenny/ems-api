@@ -28,8 +28,7 @@ export const createFee = async (req, res, next) => {
       amountDue,
       dueDate,
       session: termDetails.session,
-      term:
-        termDetails.term.charAt(0).toUpperCase() + termDetails.term.slice(1), // Capitalize
+      term: termDetails.term, // stored lowercase (FeeModel term has lowercase: true)
     });
     await fee.save();
 

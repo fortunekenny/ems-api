@@ -34,6 +34,7 @@ const classSchema = new mongoose.Schema({
   }, // e.g., 2023/2024
   term: {
     type: String,
+    lowercase: true,
     default: function () {
       const { term } = getCurrentTermDetails(
         startTermGenerationDate,
@@ -41,7 +42,7 @@ const classSchema = new mongoose.Schema({
       );
       return term;
     },
-  }, // e.g., First, Second, Third
+  }, // e.g., first, second, third
   timetable: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "Timetable", // Reference to Timetable

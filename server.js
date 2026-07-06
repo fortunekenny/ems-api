@@ -117,7 +117,14 @@ const __dirname = path.dirname(__filename);
 
 // Security middlewares
 app.use(helmet());
-app.use(cors());
+// Cookie-based auth requires a specific origin + credentials (wildcard "*" is
+// rejected by the browser when requests are sent with withCredentials).
+app.use(
+  cors({
+    origin: process.env.CLIENT_URL || "http://localhost:3000",
+    credentials: true,
+  }),
+);
 app.use(xss());
 app.use(mongoSanitize());
 

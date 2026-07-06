@@ -29,7 +29,7 @@ router.post(
   "/",
   authenticateToken,
   checkStatus,
-  authorizeRole("admin", "teacher", "proprietor"),
+  authorizeRole("admin", /* "teacher", */ "proprietor", "student"),
   upload.array("files", 5), // Middleware to handle up to 5 files
   createStudentAnswer,
 );

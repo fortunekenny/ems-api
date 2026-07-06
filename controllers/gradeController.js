@@ -34,7 +34,7 @@ export const createGrade = async (req, res, next) => {
       throw new BadRequestError("Required fields must be provided.");
     }
 
-    const { id: userId, role: userRole } = req.user;
+    const { userId, role: userRole } = req.user;
 
     let subjectTeacherId;
     let isAuthorized = false;
@@ -251,7 +251,7 @@ export const createGrade = async (req, res, next) => {
       grade: newGrade,
       studentId: student,
       subjectName: populatedGrade.subject?.subjectName || "your subject",
-      senderId: req.user.id || req.user.userId,
+      senderId: req.user.userId,
     });
 
     res.status(StatusCodes.CREATED).json({

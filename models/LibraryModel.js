@@ -6,7 +6,7 @@ const librarySchema = new mongoose.Schema({
   isbn: { type: String, required: true, unique: true },
   availableCopies: { type: Number, default: 1 },
   session: { type: String, required: true }, // e.g., 2023/2024
-  term: { type: String, required: true }, // e.g., First, Second, Third
+  term: { type: String, required: true, lowercase: true }, // e.g., first, second, third
   borrowedBy: [{ type: mongoose.Schema.Types.ObjectId, ref: "Student" }], // List of borrowers
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now },

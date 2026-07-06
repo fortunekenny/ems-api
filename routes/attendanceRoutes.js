@@ -4,6 +4,7 @@ import {
   markStudentAttendanceForAfternoon,
   getAllAttendanceRecords,
   getAttendanceById,
+  updateAttendanceStatus,
   deleteStudentAttendanceForTerm,
   createStudentTermAttendance,
 } from "../controllers/attendanceController.js";
@@ -23,11 +24,18 @@ router.get(
   getAllAttendanceRecords,
 );
 router.get(
-  "/attendanceId",
+  "/:id",
   authenticateToken,
   checkStatus,
   authorizeRole("admin", "proprietor", "teacher", "student", "parent"),
   getAttendanceById,
+);
+router.patch(
+  "/:id",
+  authenticateToken,
+  checkStatus,
+  authorizeRole("admin", "proprietor", "teacher"),
+  updateAttendanceStatus,
 );
 router.patch(
   "/:studentId/markMorning",

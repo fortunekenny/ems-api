@@ -316,12 +316,12 @@ export const getSubjects = async (req, res, next) => {
 // Get subject by ID
 export const getSubjectById = async (req, res, next) => {
   try {
-    const { id: subjectId } = req.params;
+    const { subjectId } = req.params;
 
     const subject = await Subject.findOne({ _id: subjectId }).populate([
       { path: "classId", select: "_id className" },
-      { path: "subjectTeachers", select: "_id name email employeeID" },
-      { path: "students", select: "_id name email studentID" },
+      { path: "subjectTeachers", select: "_id firstName lastName email employeeID" },
+      { path: "students", select: "_id firstName lastName email studentID" },
     ]);
     if (!subject) {
       throw new NotFoundError(`Subject not found`);
@@ -336,7 +336,7 @@ export const getSubjectById = async (req, res, next) => {
 // Update subject
 export const updateSubject = async (req, res, next) => {
   try {
-    const { id: subjectId } = req.params;
+    const { subjectId } = req.params;
 
     const {
       subjectName,
@@ -472,7 +472,7 @@ export const deleteSubject = async (req, res, next) => {
 // Change subject teacher for a subject
 export const changeSubjectTeacher = async (req, res, next) => {
   try {
-    const { id: subjectId } = req.params;
+    const { subjectId } = req.params;
     const { subjectTeachers } = req.body; // Array of new teacher IDs
 
     if (!subjectTeachers || !Array.isArray(subjectTeachers)) {

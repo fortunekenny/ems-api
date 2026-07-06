@@ -14,9 +14,15 @@ export const initSocket = (httpServer) => {
   io.on("connection", (socket) => {
     console.log(`Socket connected: ${socket.id}`);
 
-    // Client calls this with their userId to receive personal events
-    socket.on("join", (userId) => {
-      socket.join(userId);
+    // Client calls this to receive its targeted events. Payload may be a bare
+    // userId string (back-compat) or `{ userId, role }`. We join a personal room
+    // (keyed by userId) AND a role room (`role:<role>`) so events can target
+    // "everyone with this role" — e.g. all teachers — per the route authorizeRole.
+    socket.on("join", (payload) => {
+      const userId = typeof payload === "string" ? payload : payload?.userId;
+      const role = typeof payload === "object" && payload ? payload.role : undefined;
+      if (userId) socket.join(userId.toString());
+      if (role) socket.join(`role:${role}`);
     });
 
     // Join a conversation room to receive real-time messages
@@ -86,4 +92,28 @@ export const initSocket = (httpServer) => {
 export const getIO = () => {
   if (!io) throw new Error("Socket.io not initialized.");
   return io;
+};
+
+/**
+ * Emit an event to an audience defined the same way the REST routes are guarded:
+ *  - `roles`: oversight roles (e.g. admin/proprietor/teacher) that may read the
+ *    whole resource → delivered via their `role:<role>` rooms.
+ *  - `rooms`: explicit personal rooms (individual userIds) for owner-scoped
+ *    recipients (a student + their parents) who may only read their own data.
+ *
+ * Socket.IO de-dupes across the listed rooms, so a user in several targeted rooms
+ * still receives the event once. Never throws — a socket failure must not break
+ * the originating request.
+ */
+export const emitToAuthorized = (event, payload, { roles = [], rooms = [] } = {}) => {
+  try {
+    const server = getIO();
+    const targets = new Set();
+    roles.forEach((r) => r && targets.add(`role:${r}`));
+    rooms.forEach((r) => r != null && targets.add(r.toString()));
+    if (targets.size === 0) return;
+    server.to([...targets]).emit(event, payload);
+  } catch (err) {
+    console.error("[socket] emitToAuthorized:", err.message);
+  }
 };

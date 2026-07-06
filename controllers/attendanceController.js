@@ -4,13 +4,19 @@ import InternalServerError from "../errors/internal-server-error.js";
 import NotFoundError from "../errors/not-found.js";
 import Attendance from "../models/AttendanceModel.js";
 import Student from "../models/StudentModel.js";
-import { notifyAttendanceAbsent } from "../utils/notificationService.js";
 import {
-  getCurrentSession,
+  notifyAttendanceAbsent,
+  notifyAttendanceChanged,
+} from "../utils/notificationService.js";
+import {
   getCurrentTermDetails,
   holidayDurationForEachTerm,
   startTermGenerationDate,
 } from "../utils/termGenerator.js";
+import {
+  classIdForTerm,
+  findOrCreateTermRecord,
+} from "../utils/academicRecords.js";
 
 // Utility function to check if a date is a weekday
 const isWeekday = (date) => {
@@ -49,7 +55,7 @@ export const markStudentAttendanceForMorning = async (req, res, next) => {
       req.user.role === "proprietor" ||
       (student.classId &&
         student.classId.classTeacher &&
-        student.classId.classTeacher.toString() === req.user.id);
+        student.classId.classTeacher.toString() === req.user.userId);
 
     if (!isAuthorized) {
       return res.status(StatusCodes.FORBIDDEN).json({
@@ -83,6 +89,7 @@ export const markStudentAttendanceForMorning = async (req, res, next) => {
     // Update morning status and adjust totals
     attendanceRecord.morningStatus = morningStatus;
     attendanceRecord.timeMarkedMorning = Date.now();
+    attendanceRecord.markedByMorning = req.user?.name || null;
 
     // Adjust totals based on morning status and afternoon status
     if (morningStatus === "present") {
@@ -109,6 +116,12 @@ export const markStudentAttendanceForMorning = async (req, res, next) => {
         senderId: req.user?.userId || req.user?.id,
       });
     }
+
+    // Live-push the change to the student and their parent(s).
+    await notifyAttendanceChanged({
+      attendance: attendanceRecord,
+      studentId: student._id,
+    });
 
     return res.status(StatusCodes.CREATED).json({
       message: "Attendance marked successfully.",
@@ -151,7 +164,7 @@ export const markStudentAttendanceForAfternoon = async (req, res, next) => {
       req.user.role === "proprietor" ||
       (student.classId &&
         student.classId.classTeacher &&
-        student.classId.classTeacher.toString() === req.user.id);
+        student.classId.classTeacher.toString() === req.user.userId);
 
     if (!isAuthorized) {
       return res.status(StatusCodes.FORBIDDEN).json({
@@ -187,6 +200,7 @@ export const markStudentAttendanceForAfternoon = async (req, res, next) => {
 
     attendanceRecord.afternoonStatus = afternoonStatus;
     attendanceRecord.timeMarkedAfternoon = Date.now();
+    attendanceRecord.markedByAfternoon = req.user?.name || null;
 
     // Adjust totals based on afternoon status and morning status
     if (afternoonStatus === "present" && morningStatus === "absent") {
@@ -203,6 +217,12 @@ export const markStudentAttendanceForAfternoon = async (req, res, next) => {
     // attendanceRecord.totalDaysPublicHoliday;
 
     await attendanceRecord.save();
+
+    // Live-push the change to the student and their parent(s).
+    await notifyAttendanceChanged({
+      attendance: attendanceRecord,
+      studentId: student._id,
+    });
 
     return res.status(StatusCodes.CREATED).json({
       message: "Attendance marked successfully.",
@@ -418,19 +438,96 @@ export const getAllAttendanceRecords = async (req, res, next) => {
 
 export const getAttendanceById = async (req, res, next) => {
   try {
-    const attendanceRecord = await Attendance.findById(req.params.id);
-    res
-      .status(StatusCodes.OK)
-      .json({ attendance: attendanceRecord })
-      .populate([
-        { path: "classId", select: "_id className" },
-        { path: "subject", select: "_id subjectName" },
-        { path: "student", select: "_id name" },
-        { path: "classTeacher", select: "_id name" },
-        // { path: "students", select: "_id firstName lastName" },
-      ]);
+    const attendanceRecord = await Attendance.findById(req.params.id).populate([
+      { path: "classId", select: "_id className" },
+      { path: "student", select: "_id firstName middleName lastName" },
+      { path: "classTeacher", select: "_id firstName lastName" },
+    ]);
+    if (!attendanceRecord) {
+      throw new NotFoundError("Attendance record not found");
+    }
+    res.status(StatusCodes.OK).json({ attendance: attendanceRecord });
   } catch (error) {
     console.error("Error getting attendance record: ", error);
+    next(new InternalServerError(error.message));
+  }
+};
+
+// Update a single attendance record's morning/afternoon status by id. Unlike
+// markMorning/markAfternoon (which only touch today's record), this lets an
+// admin/teacher correct any day in the register.
+export const updateAttendanceStatus = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { morningStatus, afternoonStatus } = req.body;
+    const allowed = ["present", "absent", "publicHoliday", "pending"];
+
+    if (morningStatus === undefined && afternoonStatus === undefined) {
+      throw new BadRequestError(
+        "Provide morningStatus and/or afternoonStatus to update.",
+      );
+    }
+    for (const [key, value] of [
+      ["morningStatus", morningStatus],
+      ["afternoonStatus", afternoonStatus],
+    ]) {
+      if (value !== undefined && !allowed.includes(value)) {
+        throw new BadRequestError(
+          `Invalid ${key} '${value}'. Allowed: ${allowed.join(", ")}.`,
+        );
+      }
+    }
+
+    const record = await Attendance.findById(id);
+    if (!record) {
+      throw new NotFoundError("Attendance record not found");
+    }
+
+    // Date-based marking rules:
+    //  • future days   → cannot be marked by anyone
+    //  • past days     → only an admin may mark/correct them
+    //  • today         → normal authorized users may mark
+    const recordDate = new Date(record.date);
+    recordDate.setHours(0, 0, 0, 0);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    if (recordDate.getTime() > today.getTime()) {
+      return res.status(StatusCodes.FORBIDDEN).json({
+        message: "Attendance cannot be marked for a future date.",
+      });
+    }
+
+    if (recordDate.getTime() < today.getTime() && req.user.role !== "admin") {
+      return res.status(StatusCodes.FORBIDDEN).json({
+        message: "Only an admin can mark or correct attendance for past dates.",
+      });
+    }
+
+    if (morningStatus !== undefined) {
+      record.morningStatus = morningStatus;
+      record.timeMarkedMorning = Date.now();
+      record.markedByMorning = req.user?.name || null;
+    }
+    if (afternoonStatus !== undefined) {
+      record.afternoonStatus = afternoonStatus;
+      record.timeMarkedAfternoon = Date.now();
+      record.markedByAfternoon = req.user?.name || null;
+    }
+    await record.save();
+
+    const attendance = await Attendance.findById(record._id).populate([
+      { path: "classId", select: "_id className" },
+      { path: "student", select: "_id firstName middleName lastName" },
+      { path: "classTeacher", select: "_id firstName lastName" },
+    ]);
+
+    // Live-push the change to the student and their parent(s).
+    await notifyAttendanceChanged({ attendance: record, studentId: record.student });
+
+    res.status(StatusCodes.OK).json({ attendance });
+  } catch (error) {
+    console.error("Error updating attendance status: ", error);
     next(new InternalServerError(error.message));
   }
 };
@@ -509,47 +606,44 @@ export const createStudentTermAttendance = async (req, res, next) => {
       throw new NotFoundError("Student not found.");
     }
     const classId =
-      student.academicRecords?.find(
-        (rec) => rec.term === term && rec.session === session,
-      )?.classId || student.classId;
+      classIdForTerm(student, { term, session }) || student.classId;
 
     // Get the class teacher
     const assignedClass = await Class.findById(classId);
     const classTeacher = assignedClass ? assignedClass.classTeacher : undefined;
 
-    // Create attendance records for each school day
+    // Create attendance records for each school day. schoolDays is chronological
+    // and already excludes weekends/public holidays, so the index is the day's
+    // position in the term; the model derives weekOfTerm from it (5 days = 1 week).
     const attendanceIds = [];
-    for (const date of schoolDays) {
+    for (let i = 0; i < schoolDays.length; i++) {
       const attendance = new Attendance({
         student: student._id,
         classId: classId,
-        date: date,
+        date: schoolDays[i],
         morningStatus: "pending",
         afternoonStatus: "pending",
         classTeacher: classTeacher,
         term,
         session,
+        dayOfTerm: i + 1,
       });
       const savedAttendance = await attendance.save();
       attendanceIds.push(savedAttendance._id);
     }
 
-    // Update student's academicRecords.attendance array for the correct term/session/class
-    // Find the correct academic record
-    const recordIndex = student.academicRecords.findIndex(
-      (rec) =>
-        rec.term === term &&
-        rec.session === session &&
-        rec.classId?.toString() === classId.toString(),
-    );
-    if (recordIndex !== -1) {
-      // Append new attendance IDs to the academic record's attendance array
-      student.academicRecords[recordIndex].attendance = [
-        ...(student.academicRecords[recordIndex].attendance || []),
-        ...attendanceIds,
-      ];
-      await student.save();
-    }
+    // Link the new attendance IDs onto the student's (class, session, term) entry,
+    // creating the class group / term entry if it doesn't exist yet.
+    const termRecord = findOrCreateTermRecord(student, {
+      term,
+      session,
+      classId,
+    });
+    termRecord.attendance = [
+      ...(termRecord.attendance || []),
+      ...attendanceIds,
+    ];
+    await student.save();
 
     res.status(StatusCodes.CREATED).json({
       message: `Attendance records created for student for term ${term} (${session})`,

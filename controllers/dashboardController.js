@@ -24,8 +24,29 @@ import {
   startTermGenerationDate,
   holidayDurationForEachTerm,
 } from "../utils/termGenerator.js";
+import { getIO } from "../utils/socket.js";
 
 const toId = (id) => new mongoose.Types.ObjectId(id);
+
+// Push a freshly-computed dashboard snapshot to the requester's personal socket
+// room (joined client-side via `join` with the user's id). This keeps any other
+// open tabs/devices for the same user in sync in real time without a manual
+// refetch. A socket failure must never break the HTTP response.
+const emitDashboard = (req, payload) => {
+  const room = (req.user?.userId || req.user?.parentId)?.toString();
+  if (!room) return;
+  try {
+    getIO().to(room).emit("dashboard:update", {
+      role: req.user.role,
+      term: payload.term,
+      session: payload.session,
+      data: payload,
+    });
+  } catch (err) {
+    // getIO throws if socket.io isn't initialized — log and move on.
+    console.error("[DashboardController] socket emit failed:", err.message);
+  }
+};
 
 const pct = (obtained, obtainable) =>
   obtainable > 0 ? +((obtained / obtainable) * 100).toFixed(1) : 0;
@@ -181,7 +202,7 @@ export const getStudentDashboard = async (req, res) => {
     if (letter in gradeDistribution) gradeDistribution[letter]++;
   });
 
-  res.status(StatusCodes.OK).json({
+  const payload = {
     term,
     session,
     academicPerformance: {
@@ -242,7 +263,10 @@ export const getStudentDashboard = async (req, res) => {
     },
     liveClasses: classroomStats[0] ?? { sessionsAttended: 0, totalMinutes: 0 },
     unreadNotifications: unreadCount,
-  });
+  };
+
+  emitDashboard(req, payload);
+  res.status(StatusCodes.OK).json(payload);
 };
 
 // ─── Parent ───────────────────────────────────────────────────────────────────
@@ -289,7 +313,9 @@ export const getParentDashboard = async (req, res) => {
   const uniqueIds = [...new Map(childrenIds.map((id) => [id.toString(), id])).values()];
 
   if (!uniqueIds.length) {
-    return res.status(StatusCodes.OK).json({ term, session, children: [] });
+    const emptyPayload = { term, session, children: [] };
+    emitDashboard(req, emptyPayload);
+    return res.status(StatusCodes.OK).json(emptyPayload);
   }
 
   const students = await Student.find({ _id: { $in: uniqueIds } }).select(
@@ -407,7 +433,9 @@ export const getParentDashboard = async (req, res) => {
     }),
   );
 
-  res.status(StatusCodes.OK).json({ term, session, children });
+  const payload = { term, session, children };
+  emitDashboard(req, payload);
+  res.status(StatusCodes.OK).json(payload);
 };
 
 // ─── Teacher ──────────────────────────────────────────────────────────────────
@@ -634,7 +662,7 @@ export const getTeacherDashboard = async (req, res) => {
   // Attendance — build a map from classId → className
   const classMap = Object.fromEntries(myClasses.map((c) => [c._id.toString(), c.className]));
 
-  res.status(StatusCodes.OK).json({
+  const payload = {
     term,
     session,
     overview: {
@@ -687,7 +715,10 @@ export const getTeacherDashboard = async (req, res) => {
       classwork: assessmentBlock(classworkStats),
     },
     unreadNotifications: unreadCount,
-  });
+  };
+
+  emitDashboard(req, payload);
+  res.status(StatusCodes.OK).json(payload);
 };
 
 // ─── Admin / Proprietor ───────────────────────────────────────────────────────
@@ -919,7 +950,7 @@ export const getAdminDashboard = async (req, res) => {
     staffMap[s._id] = { total: s.total, active: s.active, verified: s.verified };
   });
 
-  res.status(StatusCodes.OK).json({
+  const payload = {
     term,
     session,
     overview: {
@@ -973,7 +1004,10 @@ export const getAdminDashboard = async (req, res) => {
       unreadByRole: notifMap,
       totalUnread: Object.values(notifMap).reduce((s, v) => s + v, 0),
     },
-  });
+  };
+
+  emitDashboard(req, payload);
+  res.status(StatusCodes.OK).json(payload);
 };
 
 // ─── Non-teaching Staff ───────────────────────────────────────────────────────
@@ -1060,7 +1094,7 @@ export const getStaffDashboard = async (req, res) => {
 
   const att = attendanceSummary[0] ?? { avgPresent: 0, avgAbsent: 0, avgSchoolOpened: 0, totalRecords: 0 };
 
-  res.status(StatusCodes.OK).json({
+  const payload = {
     term,
     session,
     overview: {
@@ -1081,5 +1115,8 @@ export const getStaffDashboard = async (req, res) => {
     },
     library: libraryStats[0] ?? { totalTitles: 0, totalCopies: 0, borrowed: 0 },
     unreadNotifications: unreadCount,
-  });
+  };
+
+  emitDashboard(req, payload);
+  res.status(StatusCodes.OK).json(payload);
 };

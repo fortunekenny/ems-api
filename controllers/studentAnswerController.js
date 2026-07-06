@@ -16,11 +16,14 @@ import {
   calculateSemanticSimilarity,
   extractTextFromFile,
 } from "../utils/textExtractor.js";
+import { findOrCreateTermRecord } from "../utils/academicRecords.js";
 import {
   getCurrentTermDetails,
   startTermGenerationDate,
   holidayDurationForEachTerm,
 } from "../utils/termGenerator.js";
+import { emitToAuthorized } from "../utils/socket.js";
+import { studentRooms } from "../utils/notificationService.js";
 // import * as tf from "@tensorflow/tfjs";
 // import use from "@tensorflow-models/universal-sentence-encoder";
 
@@ -31,7 +34,7 @@ export const createStudentAnswer = async (req, res, next) => {
   // no partial writes occur if any error happens.
   const mongoSession = await mongoose.startSession();
   try {
-    const { id: userId, role: userRole } = req.user;
+    const { userId, role: userRole } = req.user;
     const { student, answers, evaluationTypeId } = req.body;
 
     if (!answers || !evaluationTypeId) {
@@ -46,13 +49,16 @@ export const createStudentAnswer = async (req, res, next) => {
       holidayDurationForEachTerm,
     );
 
-    let studentId = userId;
-    if (["admin", "proprietor"].includes(userRole)) {
-      if (!student)
-        throw new BadRequestError("Admin must specify a student ID.");
-      studentId = mongoose.Types.ObjectId.createFromHexString(student);
+    // A student submits for themselves (their own id from the token — a student
+    // can never submit on behalf of someone else). Staff (admin/proprietor/
+    // teacher) submit on a specific student's behalf and must name that student.
+    let studentId;
+    if (userRole === "student") {
+      studentId = mongoose.Types.ObjectId.createFromHexString(String(userId));
     } else {
-      studentId = mongoose.Types.ObjectId.createFromHexString(userId);
+      if (!student)
+        throw new BadRequestError("A student ID is required.");
+      studentId = mongoose.Types.ObjectId.createFromHexString(String(student));
     }
 
     // Run all DB reads/writes inside a transaction to ensure atomicity
@@ -277,34 +283,23 @@ export const createStudentAnswer = async (req, res, next) => {
         mongoSession,
       );
       if (studentDoc) {
-        const recordIndex = studentDoc.academicRecords.findIndex(
-          (rec) =>
-            rec.term === evaluation.term &&
-            rec.session === evaluation.session &&
-            rec.classId?.toString() === classId.toString(),
-        );
-        if (recordIndex !== -1) {
-          if (evaluationType === "Assignment") {
-            studentDoc.academicRecords[recordIndex].assignments = [
-              ...(studentDoc.academicRecords[recordIndex].assignments || []),
-              createdStudentAnswerId,
-            ];
-          } else if (evaluationType === "ClassWork") {
-            studentDoc.academicRecords[recordIndex].classworks = [
-              ...(studentDoc.academicRecords[recordIndex].classworks || []),
-              createdStudentAnswerId,
-            ];
-          } else if (evaluationType === "Test") {
-            studentDoc.academicRecords[recordIndex].tests = [
-              ...(studentDoc.academicRecords[recordIndex].tests || []),
-              createdStudentAnswerId,
-            ];
-          } else if (evaluationType === "Exam") {
-            studentDoc.academicRecords[recordIndex].exam =
-              createdStudentAnswerId;
-          }
-          await studentDoc.save({ session: mongoSession });
+        // Attach the answer to the student's (class, session, term) entry,
+        // creating the class group / term entry if it doesn't exist yet.
+        const rec = findOrCreateTermRecord(studentDoc, {
+          term: evaluation.term,
+          session: evaluation.session,
+          classId,
+        });
+        if (evaluationType === "Assignment") {
+          rec.assignments = [...(rec.assignments || []), createdStudentAnswerId];
+        } else if (evaluationType === "ClassWork") {
+          rec.classworks = [...(rec.classworks || []), createdStudentAnswerId];
+        } else if (evaluationType === "Test") {
+          rec.tests = [...(rec.tests || []), createdStudentAnswerId];
+        } else if (evaluationType === "Exam") {
+          rec.exam = createdStudentAnswerId;
         }
+        await studentDoc.save({ session: mongoSession });
       }
     });
 
@@ -317,6 +312,23 @@ export const createStudentAnswer = async (req, res, next) => {
       { path: "subject", select: "_id subjectName" },
       { path: "student", select: "_id firstName middleName lastName" },
     ]);
+
+    // Live: a student just submitted — push to oversight staff (their assessment
+    // dashboards' submission counts tick up) and to the student's own side.
+    const submitterId = populatedStudentAnswer?.student?._id;
+    if (submitterId) {
+      emitToAuthorized(
+        "submission:received",
+        {
+          submissionId: populatedStudentAnswer._id,
+          studentId: submitterId.toString(),
+          evaluationType: populatedStudentAnswer.evaluationType,
+          evaluationId: populatedStudentAnswer.evaluationTypeId,
+          subject: populatedStudentAnswer.subject?.subjectName,
+        },
+        { roles: ["admin", "proprietor", "teacher"], rooms: await studentRooms(submitterId) },
+      );
+    }
 
     res.status(StatusCodes.CREATED).json({
       message: "Answer submitted successfully",
@@ -644,7 +656,7 @@ export const getStudentAnswersByEvaluation = async (req, res, next) => {
 export const updateStudentAnswer = async (req, res, next) => {
   try {
     const { id } = req.params; // StudentAnswer ID
-    const { id: userId, role: userRole } = req.user;
+    const { userId, role: userRole } = req.user;
     const { answers } = req.body; // May be provided or not
 
     // Fetch existing StudentAnswer
@@ -663,13 +675,17 @@ export const updateStudentAnswer = async (req, res, next) => {
       );
     }
 
-    // Determine the student ID from the token or student field in the document
-    let studentId = userId; // Default to logged-in user
-    if (["admin", "proprietor"].includes(userRole)) {
-      studentId = student;
+    // A student may only edit their OWN answer; staff act on the answer's
+    // existing owner. Guard ownership so one student can't PATCH another's answer.
+    let studentId;
+    if (userRole === "student") {
+      studentId = mongoose.Types.ObjectId.createFromHexString(String(userId));
+      if (!student || String(student) !== String(studentId)) {
+        throw new BadRequestError("You can only update your own answer.");
+      }
+    } else {
+      studentId = student; // the answer's existing owner
     }
-
-    let evaluationTotalScore;
 
     // Validate and fetch evaluation
     const evaluation = await EvaluationModel.findById(
@@ -678,6 +694,14 @@ export const updateStudentAnswer = async (req, res, next) => {
     if (!evaluation) {
       throw new NotFoundError("Evaluation not found.");
     }
+
+    // Total obtainable marks — derived from the evaluation's questions so grading
+    // works even when this update doesn't change the answers themselves (without
+    // this it was NaN, corrupting the recomputed grade).
+    let evaluationTotalScore = (evaluation.questions ?? []).reduce(
+      (sum, q) => sum + (q.marks || 0),
+      0,
+    );
 
     // Validate student participation in the evaluation
     if (!evaluation.students.some((s) => s.equals(studentId))) {
@@ -871,7 +895,13 @@ export const updateStudentAnswer = async (req, res, next) => {
       term: evaluation.term,
       lessonWeek: evaluation.lessonWeek,
       lessonNote: evaluation.lessonNote,
-      student: newStudentId,
+      // Never blank out the owner: keep the existing student unless an
+      // admin/proprietor explicitly reassigns via body.student. (Students can't
+      // reassign — the ownership guard above already forces their own id.)
+      student:
+        ["admin", "proprietor"].includes(userRole) && newStudentId
+          ? newStudentId
+          : studentAnswer.student,
     });
 
     await studentAnswer.save();
