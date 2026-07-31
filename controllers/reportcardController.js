@@ -795,11 +795,15 @@ export const getReportCards = async (req, res, next) => {
 // Get all report cards for a specific student
 export const getReportCardsForStudent = async (req, res, next) => {
   try {
-    const reportCards = await ReportCard.find({
-      student: req.params.studentId,
-      session: req.query.session,
-      term: req.query.term,
-    }).populate("student class grades");
+    // Only scope by session/term when actually provided — passing undefined
+    // into the filter matches nothing (Mongoose casts it to null).
+    const filter = { student: req.params.studentId };
+    if (req.query.session) filter.session = req.query.session;
+    if (req.query.term) filter.term = req.query.term;
+    const reportCards = await ReportCard.find(filter).populate([
+      { path: "student", select: "_id firstName middleName lastName" },
+      { path: "classId", select: "_id className" },
+    ]);
     res.status(StatusCodes.OK).json(reportCards);
   } catch (error) {
     console.log("Error getting report cards for student:", error);

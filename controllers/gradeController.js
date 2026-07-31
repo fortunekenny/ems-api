@@ -457,7 +457,7 @@ export const getGrades = async (req, res, next) => {
 export const getGradesForStudent = async (req, res, next) => {
   try {
     const grades = await Grade.find({ student: req.params.studentId }).populate(
-      "student subject teacher",
+      "student subject teacher classId",
     );
     res.status(StatusCodes.OK).json(grades);
   } catch (error) {

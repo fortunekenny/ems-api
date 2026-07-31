@@ -116,6 +116,30 @@ export const getStudents = async (req, res, next) => {
       pipeline.push({ $match: joinMatch });
     }
 
+    // The unwinds above fan each student out to one row per class-term (needed
+    // so term/session/className can be filtered). Collapse back to a single row
+    // per student so the list never repeats a name, keeping the distinct
+    // classes the student has belonged to.
+    pipeline.push({
+      $group: {
+        _id: "$_id",
+        firstName: { $first: "$firstName" },
+        middleName: { $first: "$middleName" },
+        lastName: { $first: "$lastName" },
+        studentID: { $first: "$studentID" },
+        email: { $first: "$email" },
+        status: { $first: "$status" },
+        isVerified: { $first: "$isVerified" },
+        createdAt: { $first: "$createdAt" },
+        classes: {
+          $addToSet: {
+            _id: "$classData._id",
+            className: "$classData.className",
+          },
+        },
+      },
+    });
+
     // Sorting stage: define sort options.
     // Adjust the sort options to suit your requirements.
     const sortOptions = {
@@ -140,17 +164,12 @@ export const getStudents = async (req, res, next) => {
         firstName: 1,
         middleName: 1,
         lastName: 1,
-        classData: {
-          _id: "$classData._id",
-          className: "$classData.className",
-        },
         studentID: 1,
+        email: 1,
         status: 1,
         isVerified: 1,
         createdAt: 1,
-        term: "$academicRecords.terms.term",
-        session: "$academicRecords.session",
-        // Include other fields from student if needed.
+        classes: 1,
       },
     });
 
